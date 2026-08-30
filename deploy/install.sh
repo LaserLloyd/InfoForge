@@ -34,8 +34,10 @@ UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 UNIT_NAME="infoforge.service"
 BIN="$HOME/.local/bin/infoforge"
 
-# The predecessor. Both are read-only to this script: we migrate settings out
-# of the old config and remove the old container, and touch nothing else.
+# InfoForge's predecessor: the unpackaged ~/localwiki tree and the
+# 'localwiki-kiwix' container it ran.  Both are read-only to this script: we
+# migrate settings out of the old config and remove the old container (it holds
+# the same port), and touch nothing else.
 LEGACY_CONFIG="$HOME/localwiki/config.yaml"
 LEGACY_CONTAINER="localwiki-kiwix"
 
@@ -177,6 +179,9 @@ systemctl --user enable "$UNIT_NAME"
 info "enabled (WantedBy=default.target)"
 
 # ------------------------------------------------- 4. retire the predecessor
+# Only ever touches the predecessor's own container ($LEGACY_CONTAINER, from
+# the ~/localwiki tree InfoForge replaced) — it binds the same port, so both
+# cannot run at once.  A fresh install finds nothing here and says so.
 say "Retiring the previous kiwix container"
 existing="$(podman ps -a --filter "name=^${LEGACY_CONTAINER}\$" --format '{{.Names}}')"
 if [ -n "$existing" ]; then
