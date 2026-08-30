@@ -1,0 +1,24 @@
+[Unit]
+# InfoForge — offline-Wikipedia grounded retrieval for local AI agents.
+# This unit owns the kiwix-serve container's lifecycle, nothing else: the CLI
+# (`infoforge ask`) talks to the container over HTTP and needs no daemon.
+Description=InfoForge kiwix-serve (offline knowledge base for grounded answers)
+After=default.target
+
+[Service]
+# oneshot + RemainAfterExit: `serve start` returns as soon as the container is
+# up, but the SERVICE is meant to stay "active" for as long as the container
+# should be running, so `systemctl --user stop` has something to stop and
+# `status` reports the truth rather than "inactive (dead)" over a live podman
+# container.
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=%h/.local/bin/infoforge serve start
+ExecStop=%h/.local/bin/infoforge serve stop
+# `serve start` is idempotent, so a reload is just a re-assert of the desired
+# state (it recreates the container when the enabled-ZIM set changed).
+ExecReload=%h/.local/bin/infoforge serve recreate
+TimeoutStartSec=180
+
+[Install]
+WantedBy=default.target

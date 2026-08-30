@@ -1,0 +1,22 @@
+# Never commit real config — the real file lives at ~/.config/infoforge/config.yaml
+config.yaml
+!config.example.yaml
+
+# ZIM archives live in a user dir (default ~/zims), never in the repo
+*.zim
+*.zim.prep/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# Logs / state
+*.log
+log.jsonl
+scripts/scrub-rules.local.txt

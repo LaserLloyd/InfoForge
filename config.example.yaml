@@ -1,0 +1,50 @@
+# InfoForge configuration — copy to ~/.config/infoforge/config.yaml and edit.
+#
+# The real file lives OUTSIDE the repo (default ~/.config/infoforge/config.yaml,
+# override with the INFOFORGE_CONFIG environment variable).  Every URL below is
+# a placeholder: put your own endpoints in your own copy, never in the repo.
+
+# ---------------------------------------------------------------- the LLM brain
+# model_id is REQUIRED.  InfoForge refuses to guess a model.
+model_id: "your-model-id-here"
+
+# Any OpenAI-compatible /v1 endpoint (LM Studio, llama.cpp, vLLM, a cloud API).
+base_url: "http://127.0.0.1:1234/v1"
+
+# Leave empty for a local server that does not check credentials.
+api_key: ""
+
+# Set true only when base_url points at a StudioForge server.  It adds
+# "priority": 3 to chat bodies — a StudioForge-specific scheduling hint that
+# other OpenAI-compatible servers reject or ignore, so it stays off by default.
+studioforge: false
+
+# Tried in order when the primary is unreachable (connection error / 5xx).
+# A well-formed refusal or a 4xx is NOT a fallback trigger — that is an answer.
+fallbacks:
+  - model_id: "your-fallback-model-id"
+    base_url: "http://127.0.0.1:1234/v1"
+    api_key: ""
+
+# ------------------------------------------------------------------ kiwix-serve
+# kiwix_url is derived from kiwix_bind/kiwix_port when left unset.
+kiwix_bind: "127.0.0.1"
+kiwix_port: 8080
+# kiwix_url: "http://127.0.0.1:8080"
+
+# Where the .zim archives live.  Never inside the repo.
+zim_dir: "~/zims"
+
+# The enabled-ZIM registry (this replaces the old zims.json).
+# `file` is the filename inside zim_dir; kiwix-serve reports a book's name as
+# the filename minus ".zim", which is what the search books.name filter wants.
+zims:
+  - file: "wikipedia_en_all_nopic.zim"
+    name: "English Wikipedia"
+    enabled: true
+
+# --------------------------------------------------------------------- tuning
+max_articles: 5      # articles handed to the LLM as sources
+max_chars: 8000      # per-article character budget after smart truncation
+search_pool: 15      # full-text hits pulled per ZIM before reranking
+timeout_s: 180       # LLM request timeout in seconds
