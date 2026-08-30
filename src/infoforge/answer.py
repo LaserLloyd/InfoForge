@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 
 import requests
 
-from .config import Config, Endpoint, InfoForgeError, LLMUnreachableError, EXIT_CONFIG
+from .config import EXIT_CONFIG, Config, Endpoint, InfoForgeError, LLMUnreachableError
 from .logging_ import event, warn
 from .retrieve import Source
 

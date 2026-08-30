@@ -6,8 +6,8 @@ Every HTTP call goes through an injected fake session — no network, no podman.
 from __future__ import annotations
 
 import requests
-
 from conftest import FakeResponse, search_xml
+
 from infoforge import kiwix
 
 
@@ -254,9 +254,10 @@ def test_ensure_starts_a_stopped_container(cfg, monkeypatch):
 
 
 def test_ensure_refuses_with_a_pointed_message_when_no_zims_exist(cfg, monkeypatch):
+    from dataclasses import replace
+
     import pytest
 
-    from dataclasses import replace
     from infoforge.config import Zim
     monkeypatch.setattr(kiwix, "_podman", FakePodman())
     cfg2 = replace(cfg, zims=(Zim(file="absent.zim", name="missing"),))

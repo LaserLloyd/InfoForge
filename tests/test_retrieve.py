@@ -11,7 +11,6 @@ from infoforge.retrieve import (
     title_phrases,
 )
 
-
 # ------------------------------------------------------------------ keywords
 
 def test_keyword_query_strips_stopwords_and_weak_verbs():

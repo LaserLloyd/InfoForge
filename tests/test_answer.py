@@ -6,8 +6,8 @@ from dataclasses import replace
 
 import pytest
 import requests
-
 from conftest import FakeResponse
+
 from infoforge import answer as answer_mod
 from infoforge.answer import (
     LLMRequestError,
