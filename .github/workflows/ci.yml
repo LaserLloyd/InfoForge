@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync the locked environment
+        run: uv sync --locked
+
+      - name: Tests
+        run: uv run pytest
+
+      - name: Lint
+        run: uvx ruff check .
+
+      - name: Privacy scanner self-test
+        run: uv run python scripts/scrub_check.py --selftest
