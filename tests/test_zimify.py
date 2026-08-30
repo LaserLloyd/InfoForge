@@ -40,6 +40,9 @@ def test_prepares_a_site_and_reports_the_command_without_zimwriterfs(
     assert (prep / "notes.md").is_file()  # no pandoc -> copied through
     assert report["command"][0] == "zimwriterfs"
     assert "--title=Docs" in report["command"]
+    # zim-tools requires these; a printed command without them cannot be run.
+    assert "--creator=InfoForge" in report["command"]
+    assert "--publisher=InfoForge" in report["command"]
 
 
 def test_index_links_and_escapes_every_file(docs, tmp_path, monkeypatch):
@@ -67,7 +70,16 @@ def test_build_runs_zimwriterfs_with_fixed_argv(docs, tmp_path, monkeypatch):
     assert isinstance(calls["argv"], list)  # argv list, never a shell string
     assert calls["argv"][0] == "zimwriterfs"
     assert "--title=T" in calls["argv"]
+    assert "--creator=InfoForge" in calls["argv"]
+    assert "--publisher=InfoForge" in calls["argv"]
     assert calls["cwd"] == report["prep_dir"]
+
+
+def test_creator_and_publisher_are_overridable(docs, tmp_path, monkeypatch):
+    monkeypatch.setattr(zimify_mod, "_have", lambda tool: False)
+    report = zimify(docs, tmp_path / "out.zim", creator="Ada", publisher="Press")
+    assert "--creator=Ada" in report["command"]
+    assert "--publisher=Press" in report["command"]
 
 
 def test_a_failing_build_is_reported(docs, tmp_path, monkeypatch):

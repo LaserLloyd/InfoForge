@@ -69,7 +69,8 @@ def _write_index(prep_dir: Path, files: list[Path], title: str, description: str
 
 def zimify(input_dir: Path, output_zim: Path, title: str = "",
            description: str = "Local knowledge base",
-           language: str = "eng") -> dict:
+           language: str = "eng", creator: str = "InfoForge",
+           publisher: str = "InfoForge") -> dict:
     """Prepare (and if possible build) a .zim from ``input_dir``.
 
     Returns a report dict: ``{"built": bool, "zim": path, "prep_dir": path,
@@ -103,9 +104,12 @@ def zimify(input_dir: Path, output_zim: Path, title: str = "",
 
     _write_index(prep_dir, files, title, description)
 
+    # --creator and --publisher are mandatory in current zim-tools; without
+    # them zimwriterfs refuses the build with a usage error.
     command = [
         "zimwriterfs", "--welcome=index.html", f"--language={language}",
         f"--title={title}", f"--description={description}",
+        f"--creator={creator}", f"--publisher={publisher}",
         ".", str(output_zim),
     ]
 

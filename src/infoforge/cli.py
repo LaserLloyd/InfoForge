@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shlex
 import sys
 import time
 import xml.etree.ElementTree as ET
@@ -21,7 +22,9 @@ from pathlib import Path
 
 import requests
 
-from . import __version__, answer as answer_mod, doctor as doctor_mod, kiwix, retrieve
+from . import __version__, kiwix, retrieve
+from . import answer as answer_mod
+from . import doctor as doctor_mod
 from .config import (
     EXIT_CITATION,
     EXIT_OK,
@@ -340,7 +343,8 @@ def cmd_zimify(args) -> int:
         output = base / f"{input_dir.resolve().name}.zim"
 
     report = zimify(input_dir, output, title=args.title or "",
-                    description=args.description)
+                    description=args.description,
+                    creator=args.creator, publisher=args.publisher)
     if report["built"]:
         print(f"built {report['zim']} from {report['files']} file(s)")
         print(f"  prepared HTML kept at {report['prep_dir']} (safe to delete)")
@@ -349,7 +353,9 @@ def cmd_zimify(args) -> int:
         print("zimwriterfs is not installed, so the .zim was NOT built.")
         print(f"  prepared HTML site: {report['prep_dir']}")
         print("  install zimwriterfs (zim-tools), then run from that directory:")
-        print("    " + " ".join(report["command"]))
+        # shlex.join so a title/description containing spaces stays one
+        # argument when the printed command is pasted into a shell.
+        print("    " + shlex.join(report["command"]))
     event("zimify", built=report["built"], files=report["files"])
     return EXIT_OK
 
@@ -407,6 +413,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="output .zim path (default: <zim_dir>/<dirname>.zim)")
     zf.add_argument("--title")
     zf.add_argument("--description", default="Local knowledge base")
+    zf.add_argument("--creator", default="InfoForge",
+                    help="zimwriterfs --creator (mandatory metadata)")
+    zf.add_argument("--publisher", default="InfoForge",
+                    help="zimwriterfs --publisher (mandatory metadata)")
     zf.set_defaults(func=cmd_zimify)
 
     return parser
