@@ -51,7 +51,7 @@ sentence with nothing behind it.
 ## Quickstart
 
 ```bash
-git clone <this repo> infoforge && cd infoforge
+git clone https://github.com/LaserLloyd/InfoForge.git infoforge && cd infoforge  # scrub-ok: this project's own public repository URL
 
 # 1. get a database (any ZIM from https://library.kiwix.org)
 mkdir -p ~/zims
@@ -102,6 +102,9 @@ They are the contract an agent scripts against:
 | `4` | `--strict`: the model answered without citing any source it was given. |
 | `5` | No LLM was reachable. The retrieved sources are still printed, so search alone remains useful. |
 
+`infoforge doctor` sits outside that table: it exits **1** when any health check
+failed, and `0` when they all passed.
+
 ---
 
 ## Configuration
@@ -128,7 +131,8 @@ committed.
 | `max_articles` | `5` | How many reranked articles are fetched and fed to the model. |
 | `max_chars` | `8000` | Characters of article text per source. |
 | `search_pool` | `15` | Hits pulled from Kiwix before reranking. Larger pool, better top-5, slightly slower. |
-| `timeout_s` | | HTTP timeout for kiwix and LLM calls. |
+| `timeout_s` | `180` | Timeout in seconds for **LLM requests only**. The kiwix HTTP timeouts are fixed constants and are not configurable. |
+| `hold_wait_s` | `300` | How long to wait out an endpoint that answers "busy" (HTTP 503/429, e.g. StudioForge's `priority_hold`) before moving to the next fallback. `0` fails straight through. |
 
 ### The fallback chain
 
@@ -166,8 +170,10 @@ and each one was added because the container failed without it:
 - **Explicit `/data/<file>.zim` arguments** — the image's entrypoint otherwise
   runs `kiwix-serve --port=8080` with no path and dies with "Arguments did not
   match expected patterns". The file list comes from the `zims:` registry
-  (enabled entries that actually exist); if none match, every `*.zim` in
-  `zim_dir` is served.
+  (enabled entries that actually exist); if none match, InfoForge refuses to
+  start the container and says so — an empty file list is a configuration
+  error, not something to paper over by serving whatever happens to be in
+  `zim_dir`.
 - **`-k` (`--skipInvalid`)** — a partially downloaded ZIM is invalid, and
   without this flag one in-progress download takes the whole server down. With
   it, the finished databases keep working.
@@ -197,6 +203,11 @@ $ systemctl --user restart infoforge.service    # re-asserts `serve start`
 Restarting the unit is also the right way to revive a stopped or missing
 container. Enable lingering (`loginctl enable-linger "$USER"`) if you want
 kiwix up before you log in.
+
+**No systemd user session?** On hosts without one (a container, a minimal
+image, macOS), stop after `uv tool install .` and `infoforge serve start`.
+Everything except autostart works exactly the same; you just bring the
+container up yourself after a reboot.
 
 ---
 
