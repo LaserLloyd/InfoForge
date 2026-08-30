@@ -27,6 +27,14 @@ def test_minimal_config_gets_defaults(tmp_path):
     assert cfg.search_pool == 15
     assert cfg.studioforge is False
     assert cfg.fallbacks == ()
+    assert cfg.hold_wait_s == 300
+
+
+def test_hold_wait_s_zero_is_allowed_negative_is_not(tmp_path):
+    cfg = config_mod.load(write(tmp_path, MINIMAL + "hold_wait_s: 0\n"))
+    assert cfg.hold_wait_s == 0
+    with pytest.raises(ConfigError, match="hold_wait_s"):
+        config_mod.load(write(tmp_path, MINIMAL + "hold_wait_s: -1\n"))
 
 
 def test_kiwix_url_is_derived_from_bind_and_port(tmp_path):

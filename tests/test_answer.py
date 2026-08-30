@@ -106,17 +106,65 @@ def test_connection_error_advances_to_the_fallback(cfg):
 
 
 def test_server_error_advances_to_the_fallback(cfg):
-    session = ChainSession(FakeResponse(503, "overloaded"),
+    session = ChainSession(FakeResponse(500, "exploded"),
                            reply("According to Emu War, 1932."))
     result = answer_mod.answer_question(cfg, "q", SOURCES, session=session)
     assert result.endpoint.model_id == "fallback-model"
 
 
-def test_rate_limit_advances_to_the_fallback(cfg):
-    session = ChainSession(FakeResponse(429, "slow down"),
-                           reply("According to Emu War, 1932."))
-    assert answer_mod.answer_question(
-        cfg, "q", SOURCES, session=session).endpoint.model_id == "fallback-model"
+def test_busy_with_zero_hold_budget_advances_to_the_fallback(cfg):
+    # hold_wait_s=0 (the test fixture) restores fail-fast: a busy signal
+    # advances the chain immediately instead of waiting.
+    for status in (503, 429):
+        session = ChainSession(FakeResponse(status, "busy"),
+                               reply("According to Emu War, 1932."))
+        assert answer_mod.answer_question(
+            cfg, "q", SOURCES, session=session).endpoint.model_id == "fallback-model"
+
+
+def test_priority_hold_waits_out_the_same_endpoint(cfg, monkeypatch):
+    # StudioForge's 503 priority_hold: honour Retry-After and retry the SAME
+    # endpoint — the primary must answer, no fallback involved.
+    naps = []
+    monkeypatch.setattr(answer_mod.time, "sleep", naps.append)
+    held = replace(cfg, hold_wait_s=300)
+    session = ChainSession(
+        FakeResponse(503, '{"error": "priority_hold"}',
+                     headers={"Retry-After": "7"}),
+        reply("According to Emu War, 1932."),
+    )
+    result = answer_mod.answer_question(held, "q", SOURCES, session=session)
+    assert result.endpoint.model_id == "test-model"
+    assert len(session.urls) == 2 and session.urls[0] == session.urls[1]
+    assert naps == [7.0]
+
+
+def test_hold_delay_falls_back_to_json_then_default(cfg):
+    assert answer_mod._hold_delay_s(
+        FakeResponse(503, json_data={"retry_after_s": 42})) == 42.0
+    assert answer_mod._hold_delay_s(
+        FakeResponse(503, "no shape")) == answer_mod._HOLD_DEFAULT_DELAY_S
+    # Clamped: never hammer (min 1s), never nap for an hour on a bad header.
+    assert answer_mod._hold_delay_s(
+        FakeResponse(429, headers={"Retry-After": "0"})) == 1.0
+    assert answer_mod._hold_delay_s(
+        FakeResponse(429, headers={"Retry-After": "3600"})) == 120.0
+
+
+def test_hold_budget_exhaustion_advances_to_the_fallback(cfg, monkeypatch):
+    # Simulate the clock running out after the first nap.
+    clock = iter([0.0, 0.0, 100.0, 100.0])
+    monkeypatch.setattr(answer_mod.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(answer_mod.time, "sleep", lambda s: None)
+    held = replace(cfg, hold_wait_s=60)
+    session = ChainSession(
+        FakeResponse(503, "priority_hold"),
+        FakeResponse(503, "priority_hold"),
+        reply("According to Emu War, 1932."),
+    )
+    result = answer_mod.answer_question(held, "q", SOURCES, session=session)
+    assert result.endpoint.model_id == "fallback-model"
+    assert [a.ok for a in result.attempts] == [False, True]
 
 
 def test_a_refusal_is_an_answer_not_a_fallback_trigger(cfg):

@@ -32,16 +32,18 @@ def cfg(tmp_path) -> Config:
         max_chars=500,
         search_pool=15,
         timeout_s=5,
+        hold_wait_s=0,
     )
 
 
 class FakeResponse:
     """Minimal stand-in for requests.Response."""
 
-    def __init__(self, status_code=200, text="", json_data=None):
+    def __init__(self, status_code=200, text="", json_data=None, headers=None):
         self.status_code = status_code
         self.text = text
         self._json = json_data
+        self.headers = headers or {}
 
     def json(self):
         if self._json is None:

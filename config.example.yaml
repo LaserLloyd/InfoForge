@@ -48,3 +48,6 @@ max_articles: 5      # articles handed to the LLM as sources
 max_chars: 8000      # per-article character budget after smart truncation
 search_pool: 15      # full-text hits pulled per ZIM before reranking
 timeout_s: 180       # LLM request timeout in seconds
+hold_wait_s: 300     # max seconds to wait out a busy endpoint (HTTP 503/429,
+                     # e.g. StudioForge's priority_hold) before falling back;
+                     # 0 = fail fast to the next endpoint

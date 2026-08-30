@@ -109,6 +109,7 @@ class Config:
     max_chars: int = 8000
     search_pool: int = 15
     timeout_s: int = 180
+    hold_wait_s: int = 300
     path: Path | None = None
 
     @property
@@ -273,11 +274,15 @@ def load(explicit: str | os.PathLike[str] | None = None) -> Config:
         max_chars=_as_int(parsed.get("max_chars", 8000), "max_chars", path),
         search_pool=_as_int(parsed.get("search_pool", 15), "search_pool", path),
         timeout_s=_as_int(parsed.get("timeout_s", 180), "timeout_s", path),
+        hold_wait_s=_as_int(parsed.get("hold_wait_s", 300), "hold_wait_s", path),
         path=path,
     )
 
     for key in ("max_articles", "max_chars", "search_pool", "timeout_s"):
         if getattr(cfg, key) < 1:
             raise ConfigError(f"{path}: {key} must be >= 1, got {getattr(cfg, key)}")
+    # 0 is meaningful here: it disables the busy-wait and restores fail-fast.
+    if cfg.hold_wait_s < 0:
+        raise ConfigError(f"{path}: hold_wait_s must be >= 0, got {cfg.hold_wait_s}")
 
     return cfg

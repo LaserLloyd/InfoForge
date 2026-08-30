@@ -9,6 +9,7 @@ is the whole point of a grounded assistant.
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 
 import requests
@@ -25,7 +26,16 @@ MAX_TOKENS = 2048
 # HTTP statuses worth trying the next endpoint for.  Everything else in the 4xx
 # range is our own fault (bad model id, bad auth) and would fail identically
 # on every endpoint, so it stops the chain with a pointed error instead.
-_RETRYABLE_STATUS = frozenset({408, 409, 425, 429})
+_RETRYABLE_STATUS = frozenset({408, 409, 425})
+
+# "Busy, come back shortly" — StudioForge's 503 priority_hold (a background-tier
+# request waiting for a higher-priority model load) and a plain 429.  These are
+# held out on the SAME endpoint, bounded by config hold_wait_s, before the
+# chain advances: falling straight through to a weaker fallback model on every
+# busy signal would silently downgrade answer quality exactly when the rig is
+# in demand.
+_HOLD_STATUS = frozenset({429, 503})
+_HOLD_DEFAULT_DELAY_S = 10.0
 
 
 class LLMRequestError(InfoForgeError):
@@ -112,25 +122,60 @@ def chat_body(cfg: Config, endpoint: Endpoint, prompt: str) -> dict:
     return body
 
 
+def _hold_delay_s(resp) -> float:
+    """How long the server asked us to wait: Retry-After header, then a JSON
+    ``retry_after_s`` (StudioForge's shape), then a default."""
+    raw = getattr(resp, "headers", None) or {}
+    value = raw.get("Retry-After")
+    if value is None:
+        try:
+            body = resp.json()
+            value = body.get("retry_after_s") if isinstance(body, dict) else None
+        except ValueError:
+            value = None
+    try:
+        delay = float(value)
+    except (TypeError, ValueError):
+        return _HOLD_DEFAULT_DELAY_S
+    return min(max(delay, 1.0), 120.0)
+
+
 def call_endpoint(cfg: Config, endpoint: Endpoint, prompt: str,
                   session: requests.Session | None = None) -> str:
     """POST one chat request; return the raw reply content.
 
     Raises ConnectionError-ish ``requests`` exceptions and, for 5xx, a
     RuntimeError — both mean "try the next endpoint".  A 4xx that is not
-    transient raises LLMRequestError and stops the chain.
+    transient raises LLMRequestError and stops the chain.  A 503/429 "busy"
+    is waited out on this endpoint for up to ``cfg.hold_wait_s`` seconds
+    (honouring Retry-After) before it counts as a failure.
     """
     headers = {"Content-Type": "application/json"}
     if endpoint.api_key:
         headers["Authorization"] = f"Bearer {endpoint.api_key}"
 
     post = (session or requests).post
-    resp = post(
-        endpoint.chat_url,
-        headers=headers,
-        json=chat_body(cfg, endpoint, prompt),
-        timeout=cfg.timeout_s,
-    )
+    deadline = time.monotonic() + cfg.hold_wait_s
+    while True:
+        resp = post(
+            endpoint.chat_url,
+            headers=headers,
+            json=chat_body(cfg, endpoint, prompt),
+            timeout=cfg.timeout_s,
+        )
+        if resp.status_code in _HOLD_STATUS:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError(
+                    f"HTTP {resp.status_code}: still busy after waiting "
+                    f"{cfg.hold_wait_s}s: {resp.text[:200]}"
+                )
+            delay = min(_hold_delay_s(resp), remaining)
+            warn(f"{endpoint.model_id} busy (HTTP {resp.status_code}), "
+                 f"retrying in {delay:.0f}s")
+            time.sleep(delay)
+            continue
+        break
 
     if resp.status_code >= 500 or resp.status_code in _RETRYABLE_STATUS:
         raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")

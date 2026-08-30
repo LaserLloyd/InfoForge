@@ -15,6 +15,7 @@ import argparse
 import json
 import re
 import sys
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -52,7 +53,6 @@ def _ensure_kiwix(cfg: Config) -> None:
     for _ in range(20):
         if kiwix.is_up(cfg):
             return
-        import time
         time.sleep(0.5)
     raise InfoForgeError(
         f"kiwix container is {result['state']} but nothing answers at {cfg.kiwix_url}\n"
@@ -77,7 +77,11 @@ def cmd_ask(args) -> int:
         raise InfoForgeError("ask needs a question: infoforge ask \"...\"")
 
     _ensure_kiwix(cfg)
-    sources = retrieve.retrieve(cfg, question, max_articles=args.max_articles)
+    # One session for the whole run: retrieval makes a dozen-plus HTTP calls
+    # to the same two hosts, and per-call connections add up.
+    session = requests.Session()
+    sources = retrieve.retrieve(cfg, question, max_articles=args.max_articles,
+                                session=session)
     if not sources:
         raise NoGroundingError(
             f"no sources found for {question!r}\n"
@@ -91,7 +95,8 @@ def cmd_ask(args) -> int:
         note(f"grounding on {len(sources)} article(s)")
 
     try:
-        result = answer_mod.answer_question(cfg, question, sources)
+        result = answer_mod.answer_question(cfg, question, sources,
+                                            session=session)
     except InfoForgeError as exc:
         # Exit 5 path: print what retrieval found before failing, so the run
         # is not a total loss.
@@ -143,7 +148,8 @@ def cmd_search(args) -> int:
         raise InfoForgeError("search needs a query: infoforge search \"...\"")
 
     _ensure_kiwix(cfg)
-    sources = retrieve.retrieve(cfg, question, max_articles=args.max_articles)
+    sources = retrieve.retrieve(cfg, question, max_articles=args.max_articles,
+                                session=requests.Session())
     if not sources:
         raise NoGroundingError(f"no sources found for {question!r}")
     event("search", question=question, sources=len(sources))
