@@ -20,7 +20,7 @@ jobs:
         run: uv run pytest
 
       - name: Lint
-        run: uvx ruff check .
+        run: uvx ruff@0.16.5 check .
 
       - name: Privacy scanner self-test
         run: uv run python scripts/scrub_check.py --selftest
