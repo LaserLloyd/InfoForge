@@ -26,16 +26,33 @@ MAX_TOKENS = 2048
 # HTTP statuses worth trying the next endpoint for.  Everything else in the 4xx
 # range is our own fault (bad model id, bad auth) and would fail identically
 # on every endpoint, so it stops the chain with a pointed error instead.
-_RETRYABLE_STATUS = frozenset({408, 409, 425})
+# 409 used to be blanket-included here; per the integration contract a 409
+# is never blanket-retried — its ``error.code`` decides (see _error_code /
+# _TERMINAL_CODES / _HOLD_CODES below).
+_RETRYABLE_STATUS = frozenset({408, 425})
 
 # "Busy, come back shortly" — StudioForge's 503 priority_hold (a background-tier
 # request waiting for a higher-priority model load) and a plain 429.  These are
 # held out on the SAME endpoint, bounded by config hold_wait_s, before the
 # chain advances: falling straight through to a weaker fallback model on every
-# busy signal would silently downgrade answer quality exactly when the rig is
-# in demand.
+# busy signal would silently downgrade answer quality exactly when the local
+# server is in demand.
 _HOLD_STATUS = frozenset({429, 503})
 _HOLD_DEFAULT_DELAY_S = 10.0
+
+# Integration contract: branch on the structured ``error.code``, never on
+# prose. These codes are always a wait-and-retry, unchanged, on the SAME
+# endpoint — never a reason to fall through to a weaker model.
+_HOLD_CODES = frozenset({
+    "priority_hold", "model_busy", "benchmark_busy", "model_benchmarking",
+    "client_quota", "lease_vacating",
+})
+# gpu_leased is retry-safe only when the lease itself is not a benchmark lease
+# (a benchmark lease means genuinely stand down — no polling loop at all).
+_GPU_LEASED_CODE = "gpu_leased"
+# Terminal: someone else holds the lease outright (a refusal, not a queue
+# position); force is never sent and looping cannot help.
+_TERMINAL_CODES = frozenset({"lease_conflict"})
 
 
 class LLMRequestError(InfoForgeError):
@@ -122,6 +139,38 @@ def chat_body(cfg: Config, endpoint: Endpoint, prompt: str) -> dict:
     return body
 
 
+def _error_payload(resp) -> dict:
+    """The dict a structured error body hangs its ``code`` off, or {} for a
+    plain-text / non-JSON body (an older or foreign server)."""
+    try:
+        data = resp.json()
+    except ValueError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    err = data.get("error")
+    return err if isinstance(err, dict) else data
+
+
+def _error_code(resp) -> str | None:
+    """The stable ``error.code`` — the integration contract says branch on
+    this, never on prose. None when the body carries no structured code at
+    all."""
+    code = _error_payload(resp).get("code")
+    return code if isinstance(code, str) else None
+
+
+def _gpu_leased_is_benchmark(resp) -> bool:
+    """Whether a ``gpu_leased`` refusal's own lease ``kind`` is "benchmark" —
+    that one case means genuinely stand down (no polling loop); any other
+    kind is retry-safe."""
+    payload = _error_payload(resp)
+    lease = payload.get("lease")
+    if not isinstance(lease, dict):
+        lease = payload
+    return lease.get("kind") == "benchmark"
+
+
 def _hold_delay_s(resp) -> float:
     """How long the server asked us to wait: Retry-After header, then a JSON
     ``retry_after_s`` (StudioForge's shape), then a default."""
@@ -146,13 +195,23 @@ def call_endpoint(cfg: Config, endpoint: Endpoint, prompt: str,
 
     Raises ConnectionError-ish ``requests`` exceptions and, for 5xx, a
     RuntimeError — both mean "try the next endpoint".  A 4xx that is not
-    transient raises LLMRequestError and stops the chain.  A 503/429 "busy"
-    is waited out on this endpoint for up to ``cfg.hold_wait_s`` seconds
-    (honouring Retry-After) before it counts as a failure.
+    transient raises LLMRequestError and stops the chain.  A 503/429 "busy",
+    or a structured ``error.code`` in the retry-safe set (``priority_hold``,
+    ``model_busy``, ``benchmark_busy``, ``model_benchmarking``,
+    ``client_quota``, ``lease_vacating``, or ``gpu_leased`` whose lease
+    ``kind`` is not ``benchmark``), is waited out on this
+    endpoint for up to ``cfg.hold_wait_s`` seconds (honouring Retry-After)
+    before it counts as a failure. A 409 ``lease_conflict`` is terminal and
+    is never blanket-retried like the rest of the 409 range used to be.
     """
     headers = {"Content-Type": "application/json"}
     if endpoint.api_key:
         headers["Authorization"] = f"Bearer {endpoint.api_key}"
+    if cfg.studioforge:
+        # Integration contract: every StudioForge caller names itself.
+        # Sent only when the config says the server is StudioForge, same
+        # gate as the `priority` body field below.
+        headers["X-SF-Client"] = "infoforge"
 
     post = (session or requests).post
     deadline = time.monotonic() + cfg.hold_wait_s
@@ -163,7 +222,21 @@ def call_endpoint(cfg: Config, endpoint: Endpoint, prompt: str,
             json=chat_body(cfg, endpoint, prompt),
             timeout=cfg.timeout_s,
         )
-        if resp.status_code in _HOLD_STATUS:
+        code = _error_code(resp) if resp.status_code >= 400 else None
+        if code in _TERMINAL_CODES:
+            # e.g. 409 lease_conflict: someone else holds the lease outright.
+            # Never blanket-retried — force is never sent and looping cannot
+            # help.
+            raise LLMRequestError(
+                f"{endpoint.base_url} refused the request ({code}): HTTP "
+                f"{resp.status_code}: {resp.text[:300]}"
+            )
+        hold_worthy = (
+            resp.status_code in _HOLD_STATUS
+            or code in _HOLD_CODES
+            or (code == _GPU_LEASED_CODE and not _gpu_leased_is_benchmark(resp))
+        )
+        if hold_worthy:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise RuntimeError(
@@ -171,8 +244,8 @@ def call_endpoint(cfg: Config, endpoint: Endpoint, prompt: str,
                     f"{cfg.hold_wait_s}s: {resp.text[:200]}"
                 )
             delay = min(_hold_delay_s(resp), remaining)
-            warn(f"{endpoint.model_id} busy (HTTP {resp.status_code}), "
-                 f"retrying in {delay:.0f}s")
+            warn(f"{endpoint.model_id} busy (HTTP {resp.status_code}"
+                 f"{f' {code}' if code else ''}), retrying in {delay:.0f}s")
             time.sleep(delay)
             continue
         break
