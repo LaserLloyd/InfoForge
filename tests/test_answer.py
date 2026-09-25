@@ -10,9 +10,12 @@ from conftest import FakeResponse
 
 from infoforge import answer as answer_mod
 from infoforge.answer import (
+    VERDICT_ANSWERED,
+    VERDICT_NOT_IN_SOURCES,
     LLMRequestError,
     build_prompt,
     cited_titles,
+    parse_verdict,
     strip_cot,
 )
 from infoforge.config import LLMUnreachableError
@@ -288,3 +291,77 @@ def test_attempts_never_carry_the_api_key(cfg):
     session = ChainSession(reply("According to Emu War, 1932."))
     result = answer_mod.answer_question(keyed, "q", SOURCES, session=session)
     assert "secret-key" not in repr(result.attempts)
+
+
+# ------------------------------------------------------------------ verdict
+# The grounding contract is machine-checkable: the model opens its reply with
+# ANSWERED: or NOT_IN_SOURCES:.  A refusal must never leave as exit 0.
+
+def test_prompt_asks_for_a_verdict_marker():
+    prompt = build_prompt("q", SOURCES)
+    assert "ANSWERED:" in prompt
+    assert "NOT_IN_SOURCES:" in prompt
+
+
+def test_parse_verdict_answered_strips_the_marker():
+    v = parse_verdict("ANSWERED: According to Emu War, it was 1932.")
+    assert v.verdict == VERDICT_ANSWERED
+    assert v.source == "model"
+    assert v.text == "According to Emu War, it was 1932."
+
+
+def test_parse_verdict_not_in_sources():
+    v = parse_verdict("NOT_IN_SOURCES: Emu War says nothing about breakfast.")
+    assert v.verdict == VERDICT_NOT_IN_SOURCES
+    assert v.source == "model"
+    assert v.text == "Emu War says nothing about breakfast."
+
+
+@pytest.mark.parametrize("raw", [
+    "**NOT_IN_SOURCES:** nothing here.",
+    "Verdict: NOT_IN_SOURCES: nothing here.",
+    "not in sources: nothing here.",
+    "Okay, let me look at the sources.\n\nNOT_IN_SOURCES: nothing here.",
+])
+def test_parse_verdict_tolerates_formatting_and_preambles(raw):
+    v = parse_verdict(raw)
+    assert v.verdict == VERDICT_NOT_IN_SOURCES
+    assert v.text == "nothing here."
+
+
+def test_parse_verdict_after_a_bare_closing_think_tag():
+    # R1 distills often drop the opening <think>; strip_cot must cut up to </think>.
+    raw = "The user asks about breakfast. ANSWERED: maybe?\n</think>\nNOT_IN_SOURCES: no."
+    v = parse_verdict(strip_cot(raw))
+    assert v.verdict == VERDICT_NOT_IN_SOURCES
+
+
+def test_parse_verdict_missing_marker_falls_back_to_refusal_regex():
+    v = parse_verdict("The sources do not contain information about his breakfast, "
+                      "although Emu War is mentioned.")
+    assert v.verdict == VERDICT_NOT_IN_SOURCES
+    assert v.source == "fallback"
+
+
+def test_parse_verdict_missing_marker_plain_answer_is_answered():
+    v = parse_verdict("According to Emu War, it was 1932.")
+    assert v.verdict == VERDICT_ANSWERED
+    assert v.source == "fallback"
+    assert v.text == "According to Emu War, it was 1932."
+
+
+def test_explicit_answered_verdict_wins_over_hedging_later():
+    # A real answer that notes a gap must not be misread as a refusal.
+    v = parse_verdict("ANSWERED: It was 1932, per Emu War. The sources do not "
+                      "contain the exact day.")
+    assert v.verdict == VERDICT_ANSWERED
+
+
+def test_answer_question_carries_the_verdict(cfg):
+    session = ChainSession(reply("<think>hm</think>NOT_IN_SOURCES: Emu War is "
+                                 "about 1932, not breakfast."))
+    result = answer_mod.answer_question(cfg, "q", SOURCES, session=session)
+    assert result.verdict == VERDICT_NOT_IN_SOURCES
+    assert result.text.startswith("Emu War is about")
+    # The refusal names a title, which is exactly why cited-check alone failed.
+    assert result.cited == ["Emu War"]

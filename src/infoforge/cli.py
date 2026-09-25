@@ -2,7 +2,11 @@
 
 Exit codes are a contract other tools depend on (see config.py):
   0 ok · 2 config/usage · 3 nothing to ground on · 4 --strict citation failure
-  5 every LLM unreachable.
+  5 every LLM unreachable · 6 the model said the sources lack the answer.
+
+`ask --json` prints one JSON object on every exit except a crash, always with
+``ok``, ``exit_code``, ``reason`` and ``sources`` — a wrapper never has to parse
+prose or cope with an empty stdout.
 
 Note what exit 5 does *not* do: it still prints the sources that were found.
 Retrieval and answering are separate halves, and a working search is useful on
@@ -27,6 +31,10 @@ from . import answer as answer_mod
 from . import doctor as doctor_mod
 from .config import (
     EXIT_CITATION,
+    EXIT_CONFIG,
+    EXIT_LLM,
+    EXIT_NO_GROUNDING,
+    EXIT_NOT_IN_SOURCES,
     EXIT_OK,
     Config,
     InfoForgeError,
@@ -73,9 +81,51 @@ def _print_sources(sources: list[retrieve.Source], stream=None) -> None:
 
 # ---------------------------------------------------------------------- ask
 
+# ``reason`` in `ask --json`, one per exit code (stable strings).
+REASONS = {
+    EXIT_OK: "answered",
+    EXIT_CONFIG: "config",
+    EXIT_NO_GROUNDING: "no_sources",
+    EXIT_CITATION: "uncited",
+    EXIT_LLM: "llm_unreachable",
+    EXIT_NOT_IN_SOURCES: "not_in_sources",
+}
+
+
+def _source_rows(sources: list[retrieve.Source]) -> list[dict]:
+    return [{"title": s.title, "url": s.url, "score": s.score} for s in sources]
+
+
+def _emit_ask_json(exit_code: int, question: str, sources, **extra) -> None:
+    print(json.dumps({
+        "ok": exit_code == EXIT_OK,
+        "exit_code": exit_code,
+        "reason": REASONS.get(exit_code, "error"),
+        "question": question,
+        **extra,
+        "sources": _source_rows(sources or []),
+    }, indent=2))
+
+
 def cmd_ask(args) -> int:
-    cfg = load_config(args.config)
     question = " ".join(args.question).strip()
+    sources: list[retrieve.Source] = []
+    try:
+        return _ask(args, question, sources)
+    except InfoForgeError as exc:
+        # Every failure still speaks JSON when asked to (exit 3 used to print
+        # nothing at all on stdout).  Exit 5 also lists what retrieval found.
+        if args.json:
+            _emit_ask_json(exc.exit_code, question, sources, error=str(exc))
+        elif sources:
+            _print_sources(sources, stream=sys.stdout)
+        raise
+
+
+def _ask(args, question: str, sources: list[retrieve.Source]) -> int:
+    """The ask pipeline.  ``sources`` is filled in place so cmd_ask can report
+    them on a failure after retrieval."""
+    cfg = load_config(args.config)
     if not question:
         raise InfoForgeError("ask needs a question: infoforge ask \"...\"")
 
@@ -83,8 +133,8 @@ def cmd_ask(args) -> int:
     # One session for the whole run: retrieval makes a dozen-plus HTTP calls
     # to the same two hosts, and per-call connections add up.
     session = requests.Session()
-    sources = retrieve.retrieve(cfg, question, max_articles=args.max_articles,
-                                session=session)
+    sources.extend(retrieve.retrieve(cfg, question, max_articles=args.max_articles,
+                                     session=session))
     if not sources:
         raise NoGroundingError(
             f"no sources found for {question!r}\n"
@@ -97,49 +147,48 @@ def cmd_ask(args) -> int:
     if not args.json:
         note(f"grounding on {len(sources)} article(s)")
 
-    try:
-        result = answer_mod.answer_question(cfg, question, sources,
-                                            session=session)
-    except InfoForgeError as exc:
-        # Exit 5 path: print what retrieval found before failing, so the run
-        # is not a total loss.
-        if not args.json:
-            _print_sources(sources, stream=sys.stdout)
-        else:
-            print(json.dumps({
-                "ok": False,
-                "question": question,
-                "error": str(exc),
-                "sources": [{"title": s.title, "url": s.url} for s in sources],
-            }, indent=2))
-        raise
+    # Exit 5 (every LLM down) propagates to cmd_ask, which still prints the
+    # sources, so the run is not a total loss.
+    result = answer_mod.answer_question(cfg, question, sources, session=session)
+
+    # Order matters: a NOT_IN_SOURCES reply usually names a title ("Eiffel
+    # Tower does not mention…"), so it passes the citation check — the
+    # verdict must be decided first, under --strict or not.
+    if result.not_in_sources:
+        code = EXIT_NOT_IN_SOURCES
+    elif result.uncited and args.strict:
+        code = EXIT_CITATION
+    else:
+        code = EXIT_OK
 
     event("ask", question=question, model_id=result.endpoint.model_id,
-          cited=result.cited, uncited=result.uncited)
+          cited=result.cited, uncited=result.uncited, verdict=result.verdict,
+          verdict_source=result.verdict_source, exit_code=code)
 
     if args.json:
-        print(json.dumps({
-            "ok": True,
-            "question": question,
-            "answer": result.text,
-            "model_id": result.endpoint.model_id,
-            "cited": result.cited,
-            "uncited": result.uncited,
-            "sources": [{"title": s.title, "url": s.url, "score": s.score}
-                        for s in sources],
-        }, indent=2))
+        _emit_ask_json(
+            code, question, sources,
+            answer=result.text,
+            verdict=result.verdict,
+            verdict_source=result.verdict_source,
+            model_id=result.endpoint.model_id,
+            cited=result.cited,
+            uncited=result.uncited,
+        )
     else:
         print(result.text)
         print()
-        if result.uncited:
+        if result.uncited and not result.not_in_sources:
             print(answer_mod.UNCITED_WARNING)
             print()
         _print_sources(sources)
 
-    if result.uncited and args.strict:
+    if code == EXIT_NOT_IN_SOURCES:
+        print("infoforge: not in the sources: the retrieved articles do not "
+              "contain the answer (nothing was invented)", file=sys.stderr)
+    elif code == EXIT_CITATION:
         print("infoforge: strict mode: answer cited no sources", file=sys.stderr)
-        return EXIT_CITATION
-    return EXIT_OK
+    return code
 
 
 # -------------------------------------------------------------------- search
@@ -378,7 +427,8 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument("question", nargs="+")
     ask.add_argument("--json", action="store_true", help="machine-readable output")
     ask.add_argument("--strict", action="store_true",
-                     help="exit 4 if the answer cites none of the sources")
+                     help="exit 4 if the answer cites none of the sources "
+                          "(exit 6, not-in-sources, applies with or without it)")
     ask.add_argument("--max-articles", type=int, metavar="N",
                      help="override max_articles from the config")
     ask.set_defaults(func=cmd_ask)

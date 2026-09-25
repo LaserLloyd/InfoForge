@@ -94,13 +94,29 @@ overwrites an existing `~/.config/infoforge/config.yaml`.
 
 They are the contract an agent scripts against:
 
-| Code | Meaning |
-|---|---|
-| `0` | Answered, grounded in retrieved sources. |
-| `2` | Config or usage error. |
-| `3` | Nothing relevant found — **no answer was invented**. |
-| `4` | `--strict`: the model answered without citing any source it was given. |
-| `5` | No LLM was reachable. The retrieved sources are still printed, so search alone remains useful. |
+| Code | `reason` (`--json`) | Meaning |
+|---|---|---|
+| `0` | `answered` | Answered, grounded in retrieved sources. |
+| `2` | `config` | Config or usage error. |
+| `3` | `no_sources` | Nothing relevant found — **no answer was invented**. |
+| `4` | `uncited` | `--strict`: the model answered without citing any source it was given. |
+| `5` | `llm_unreachable` | No LLM was reachable. The retrieved sources are still printed, so search alone remains useful. |
+| `6` | `not_in_sources` | Articles were found, but the model says **they do not contain the answer**. Its one-line explanation and the sources are still printed. Applies with or without `--strict`. |
+
+How exit 6 is decided: the prompt tells the model to open its reply with
+`ANSWERED:` or `NOT_IN_SOURCES:`; InfoForge reads that marker (tolerating
+markdown, case and a leaked reasoning preamble — the last marker wins) and
+strips it from the printed answer. If a model omits the marker, the first
+sentence of the reply is checked against common refusal phrasing instead, and
+`--json` reports `verdict_source: "fallback"`. A refusal usually names an
+article ("Eiffel Tower does not mention…"), which is why the citation check on
+its own could never catch one.
+
+With `--json`, `ask` prints **one JSON object on every exit** except a crash —
+always with `ok`, `exit_code`, `reason` and `sources` (empty when retrieval
+found nothing); a successful or exit-6 run adds `answer`, `verdict`,
+`verdict_source`, `model_id`, `cited` and `uncited`; a failure adds `error`.
+`ok` is `true` only for exit 0.
 
 `infoforge doctor` sits outside that table: it exits **1** when any health check
 failed, and `0` when they all passed.
@@ -222,13 +238,15 @@ infoforge ask "<the question>" --json
 ```
 
 `--json` returns the answer, the source titles and their URLs, and the exit
-code's meaning, so a wrapper does not have to parse prose.
+code plus a stable `reason` string, on every exit — so a wrapper does not have
+to parse prose.
 
 Two rules are worth writing into the agent's own instructions, because they are
 what make the tool trustworthy:
 
 1. **A non-zero exit is a real answer.** Exit 3 means offline Wikipedia had
-   nothing relevant. The agent must report that, not fall back to what it
+   nothing relevant; exit 6 means it had articles but they do not answer the
+   question. The agent must report that, not fall back to what it
    thinks it remembers.
 2. **Citations are load-bearing.** The titles InfoForge prints are the evidence
    the answer stands on; pass them through to the user rather than

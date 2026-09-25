@@ -18,6 +18,7 @@ from infoforge.config import (
     EXIT_CONFIG,
     EXIT_LLM,
     EXIT_NO_GROUNDING,
+    EXIT_NOT_IN_SOURCES,
     EXIT_OK,
     Endpoint,
     LLMUnreachableError,
@@ -50,10 +51,12 @@ def config_file(tmp_path, monkeypatch):
     return path
 
 
-def stub_answer(monkeypatch, text="According to Emu War, 1932.", uncited=False):
+def stub_answer(monkeypatch, text="According to Emu War, 1932.", uncited=False,
+                verdict="answered"):
     def fake(cfg, question, sources, session=None):
         return Answer(text=text, endpoint=Endpoint("test-model", "http://x/v1"),
-                      cited=[] if uncited else ["Emu War"], uncited=uncited)
+                      cited=[] if uncited else ["Emu War"], uncited=uncited,
+                      verdict=verdict, verdict_source="model")
     monkeypatch.setattr(answer_mod, "answer_question", fake)
 
 
@@ -216,3 +219,90 @@ def test_serve_start_reports_the_action(config_file, monkeypatch, capsys):
         "action": "created", "state": "running", "files": ["test.zim"]})
     assert cli.main(["serve", "start"]) == EXIT_OK
     assert "created" in capsys.readouterr().out
+
+
+# ------------------------------------------------------------ not in sources
+
+REFUSAL = "Emu War does not say what anyone ate for breakfast."
+
+
+def test_not_in_sources_exits_6_even_though_it_names_a_title(config_file, monkeypatch,
+                                                             capsys):
+    stub_retrieve(monkeypatch)
+    stub_answer(monkeypatch, text=REFUSAL, verdict="not_in_sources")
+    assert cli.main(["ask", "breakfast?"]) == EXIT_NOT_IN_SOURCES
+    captured = capsys.readouterr()
+    assert REFUSAL in captured.out
+    assert "[1] Emu War" in captured.out          # sources still listed
+    assert "not in the sources" in captured.err
+
+
+def test_not_in_sources_exits_6_under_strict_too(config_file, monkeypatch):
+    # The cited-check passes (a title is named) — the verdict must still win.
+    stub_retrieve(monkeypatch)
+    stub_answer(monkeypatch, text=REFUSAL, verdict="not_in_sources")
+    assert cli.main(["ask", "breakfast?", "--strict"]) == EXIT_NOT_IN_SOURCES
+
+
+def test_not_in_sources_json(config_file, monkeypatch, capsys):
+    stub_retrieve(monkeypatch)
+    stub_answer(monkeypatch, text=REFUSAL, verdict="not_in_sources")
+    assert cli.main(["ask", "breakfast?", "--json"]) == EXIT_NOT_IN_SOURCES
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["exit_code"] == EXIT_NOT_IN_SOURCES
+    assert payload["reason"] == "not_in_sources"
+    assert payload["answer"] == REFUSAL
+    assert payload["sources"][0]["title"] == "Emu War"
+
+
+def test_ok_json_carries_exit_code_and_reason(config_file, monkeypatch, capsys):
+    stub_retrieve(monkeypatch)
+    stub_answer(monkeypatch)
+    assert cli.main(["ask", "q", "--json"]) == EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["exit_code"] == EXIT_OK
+    assert payload["reason"] == "answered"
+    assert payload["verdict"] == "answered"
+
+
+def test_exit_3_with_json_still_prints_json(config_file, monkeypatch, capsys):
+    stub_retrieve(monkeypatch, sources=[])
+    assert cli.main(["ask", "zqxv", "--json"]) == EXIT_NO_GROUNDING
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {**payload, "ok": False, "exit_code": EXIT_NO_GROUNDING,
+                       "reason": "no_sources", "sources": []}
+
+
+def test_strict_uncited_json_says_uncited(config_file, monkeypatch, capsys):
+    stub_retrieve(monkeypatch)
+    stub_answer(monkeypatch, text="It was 1932.", uncited=True)
+    assert cli.main(["ask", "q", "--strict", "--json"]) == EXIT_CITATION
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["exit_code"] == EXIT_CITATION
+    assert payload["reason"] == "uncited"
+
+
+def test_llm_down_json_has_exit_code_and_reason(config_file, monkeypatch, capsys):
+    stub_retrieve(monkeypatch)
+
+    def boom(cfg, question, sources, session=None):
+        raise LLMUnreachableError("every configured LLM was unreachable")
+    monkeypatch.setattr(answer_mod, "answer_question", boom)
+    assert cli.main(["ask", "q", "--json"]) == EXIT_LLM
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["exit_code"] == EXIT_LLM
+    assert payload["reason"] == "llm_unreachable"
+    assert payload["sources"][0]["title"] == "Emu War"
+
+
+def test_config_error_json(capsys, monkeypatch, tmp_path):
+    monkeypatch.setenv("INFOFORGE_CONFIG", str(tmp_path / "absent.yaml"))
+    assert cli.main(["ask", "q", "--json"]) == EXIT_CONFIG
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["exit_code"] == EXIT_CONFIG
+    assert payload["reason"] == "config"
+    assert payload["sources"] == []

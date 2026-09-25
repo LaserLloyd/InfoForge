@@ -2,8 +2,14 @@
 
 Grounding contract: the model answers ONLY from the supplied sources, cites the
 article titles it used, and says so plainly when the sources do not contain the
-answer.  That last case is a *successful* run — an honest "not in the sources"
-is the whole point of a grounded assistant.
+answer.  An honest "not in the sources" is the contract working — but it is NOT
+an answer, so it must never leave the CLI as exit 0.
+
+To make that machine-checkable the model opens its reply with a verdict marker,
+``ANSWERED:`` or ``NOT_IN_SOURCES:`` (see ``parse_verdict``).  Small reasoning
+models do not always comply, so a missing marker falls back to a refusal-phrase
+regex on the reply's first sentence.  The citation check alone cannot catch a
+refusal: "Eiffel Tower does not mention breakfast" names a source title.
 """
 
 from __future__ import annotations
@@ -78,6 +84,12 @@ class Answer:
     attempts: list[Attempt] = field(default_factory=list)
     cited: list[str] = field(default_factory=list)
     uncited: bool = False
+    verdict: str = "answered"          # VERDICT_ANSWERED | VERDICT_NOT_IN_SOURCES
+    verdict_source: str = "model"      # "model" (marker found) | "fallback" (regex)
+
+    @property
+    def not_in_sources(self) -> bool:
+        return self.verdict == VERDICT_NOT_IN_SOURCES
 
 
 # -------------------------------------------------------------------- prompt
@@ -90,6 +102,10 @@ PROMPT_HEADER = (
     'When you use information from a source, cite the article title (for '
     'example: "according to <title>").',
     "Do not invent facts, titles, or URLs that are not present in the sources.",
+    "Begin your reply with exactly one of these two markers: "
+    '"ANSWERED:" followed by the answer, if the sources contain it; or '
+    '"NOT_IN_SOURCES:" followed by one sentence saying what is missing, if they '
+    "do not.",
 )
 
 
@@ -115,10 +131,77 @@ def strip_cot(text: str) -> str:
     """
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
     text = re.sub(r"<think>.*$", "", text, flags=re.DOTALL)  # unterminated block
+    # R1 distills often omit the OPENING tag: everything up to a bare
+    # </think> is reasoning, not answer.
+    if "</think>" in text:
+        text = text.rsplit("</think>", 1)[1]
     text = re.sub(r"```think\s*.*?```", "", text, flags=re.DOTALL)
     text = re.sub(r"^\s*```[a-zA-Z]*\s*", "", text)
     text = re.sub(r"\s*```\s*$", "", text)
     return text.strip()
+
+
+# ------------------------------------------------------------------ verdict
+
+VERDICT_ANSWERED = "answered"
+VERDICT_NOT_IN_SOURCES = "not_in_sources"
+
+# The marker, tolerant of markdown bold/backticks, a "Verdict:" label, case,
+# and spaces instead of underscores ("Not in sources:").  The LAST marker in
+# the reply wins: a thinking preamble that leaked past strip_cot may rehearse
+# a verdict before the model settles on one, and the settled one comes last.
+_VERDICT_RE = re.compile(
+    r"(?:^|(?<=[\s*`>\-#]))[*`_]*(?:verdict\s*[:\-]\s*)?[*`_]*"
+    r"(ANSWERED|NOT[_ ]IN[_ ]SOURCES)[*`_]*\s*:[*`_]*\s*",
+    re.IGNORECASE,
+)
+
+# Fallback when no marker is present: the reply's FIRST sentence reads as a
+# refusal.  Only the first sentence, so an answer that merely notes a gap
+# ("It was 1889. The sources do not give the day.") stays an answer.
+_REFUSAL_RE = re.compile(
+    r"\b(?:"
+    r"(?:the\s+)?(?:provided\s+|given\s+|retrieved\s+)?(?:sources?|articles?|texts?)"
+    r"\s+(?:do|does|did)\s*(?:not|n't)\s+"
+    r"(?:contain|mention|include|provide|say|state|specify|cover|discuss|address|give)"
+    r"|not\s+(?:found|mentioned|present|contained|covered|available|provided)\s+in\s+"
+    r"(?:any\s+of\s+)?the\s+(?:provided\s+|given\s+)?(?:sources?|articles?|texts?)"
+    r"|there\s+is\s+no\s+(?:information|mention|data|record)"
+    r"|no\s+information\s+(?:about|on|regarding|is\s+(?:given|provided|available))"
+    r"|(?:cannot|can't|can\s+not|unable\s+to)\s+(?:be\s+)?"
+    r"(?:answer|determine|find|answered|determined|found)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+@dataclass
+class Verdict:
+    verdict: str   # VERDICT_ANSWERED | VERDICT_NOT_IN_SOURCES
+    source: str    # "model" | "fallback"
+    text: str      # the reply with the marker (and anything before it) removed
+
+
+def _first_sentence(text: str) -> str:
+    match = re.search(r"[.!?](?:\s|$)", text)
+    return text[:match.end()] if match else text
+
+
+def parse_verdict(text: str) -> Verdict:
+    """Read the model's grounding verdict out of an already CoT-stripped reply."""
+    matches = list(_VERDICT_RE.finditer(text))
+    if matches:
+        last = matches[-1]
+        word = re.sub(r"[_ ]", "_", last.group(1).upper())
+        verdict = VERDICT_ANSWERED if word == "ANSWERED" else VERDICT_NOT_IN_SOURCES
+        body = text[last.end():].strip()
+        if not body:
+            # Marker at the very end ("...\nNOT_IN_SOURCES:") — keep what came before.
+            body = text[:last.start()].strip()
+        return Verdict(verdict, "model", body)
+    if _REFUSAL_RE.search(_first_sentence(text.strip())):
+        return Verdict(VERDICT_NOT_IN_SOURCES, "fallback", text.strip())
+    return Verdict(VERDICT_ANSWERED, "fallback", text.strip())
 
 
 # ------------------------------------------------------------------ the call
@@ -339,15 +422,21 @@ UNCITED_WARNING = (
 
 def answer_question(cfg: Config, question: str, sources: list[Source],
                     session: requests.Session | None = None) -> Answer:
-    """Build the prompt, run the chain, strip CoT and check citations."""
+    """Build the prompt, run the chain, strip CoT, read the verdict and check
+    citations."""
     prompt = build_prompt(question, sources)
     content, endpoint, attempts = ask_llm(cfg, prompt, session=session)
-    text = strip_cot(content)
-    cited = cited_titles(text, sources)
+    verdict = parse_verdict(strip_cot(content))
+    if verdict.source == "fallback":
+        warn(f"{endpoint.model_id} gave no ANSWERED:/NOT_IN_SOURCES: marker; "
+             f"verdict inferred from phrasing ({verdict.verdict})")
+    cited = cited_titles(verdict.text, sources)
     return Answer(
-        text=text,
+        text=verdict.text,
         endpoint=endpoint,
         attempts=attempts,
         cited=cited,
         uncited=not cited,
+        verdict=verdict.verdict,
+        verdict_source=verdict.source,
     )

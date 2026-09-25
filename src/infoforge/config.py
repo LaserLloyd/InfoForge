@@ -25,6 +25,7 @@ EXIT_CONFIG = 2       # bad config or bad usage
 EXIT_NO_GROUNDING = 3  # retrieval found nothing to ground on
 EXIT_CITATION = 4     # --strict and the answer cited none of the sources
 EXIT_LLM = 5          # every LLM in the chain was unreachable
+EXIT_NOT_IN_SOURCES = 6  # the model said the retrieved sources lack the answer
 
 DEFAULT_CONFIG_PATH = Path("~/.config/infoforge/config.yaml")
 
