@@ -207,11 +207,17 @@ def cmd_search(args) -> int:
     event("search", question=question, sources=len(sources))
 
     if args.json:
-        print(json.dumps({
-            "query": question,
-            "sources": [{"title": s.title, "url": s.url, "score": s.score,
-                         "chars": len(s.text)} for s in sources],
-        }, indent=2))
+        rows = []
+        for s in sources:
+            row = {"title": s.title, "url": s.url, "score": s.score,
+                   "chars": len(s.text)}
+            if args.text:
+                # The extracted article text itself (already cut to
+                # max_chars around the question's keywords), for a caller
+                # that answers with its own model instead of `ask`.
+                row["text"] = s.text
+            rows.append(row)
+        print(json.dumps({"query": question, "sources": rows}, indent=2))
     else:
         for i, src in enumerate(sources, 1):
             print(f"[{i}] {src.title}  (score {src.score:.1f}, {len(src.text)} chars)")
@@ -436,6 +442,8 @@ def build_parser() -> argparse.ArgumentParser:
     search = sub.add_parser("search", help="retrieval only: show the sources")
     search.add_argument("question", nargs="+")
     search.add_argument("--json", action="store_true")
+    search.add_argument("--text", action="store_true",
+                        help="with --json: include each source's extracted text")
     search.add_argument("--max-articles", type=int, metavar="N")
     search.set_defaults(func=cmd_search)
 

@@ -172,6 +172,18 @@ def test_search_json_lists_sources_without_calling_the_llm(config_file, monkeypa
     payload = json.loads(capsys.readouterr().out)
     assert payload["query"] == "emu war"
     assert payload["sources"][0]["score"] == 12.0
+    assert "text" not in payload["sources"][0], "text is opt-in (--text)"
+
+
+def test_search_json_text_includes_the_extracted_article(config_file, monkeypatch,
+                                                         capsys):
+    """`--text` hands a caller the article text itself, so it can answer with
+    its own model instead of `ask` (DisPatch's Wikipedia bot does this)."""
+    stub_retrieve(monkeypatch)
+    assert cli.main(["search", "emu", "war", "--json", "--text"]) == EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    src = payload["sources"][0]
+    assert src["title"] == "Emu War" and src["text"] and src["chars"] == len(src["text"])
 
 
 def test_search_without_hits_exits_3(config_file, monkeypatch):
