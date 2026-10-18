@@ -106,20 +106,20 @@ upgrade kiwix-serve: `podman pull ghcr.io/kiwix/kiwix-serve:<tag>`, set
 
 ---
 
-> ### Run in Docker
->
-> 1. **Compose files:** `cd deploy/compose && cp infoforge.config.example.yaml infoforge.config.yaml`
->    (set `model_id` and `base_url`; list your ZIM under `zims:`), and put the `.zim` in `./zims/`.
-> 2. **Start kiwix:** `docker compose up -d kiwix` (Podman rootless: `KIWIX_USER=0 podman-compose up -d kiwix`).
-> 3. **Ask:** `docker compose run --rm infoforge doctor`, then
->    `docker compose run --rm infoforge ask "Why is the sky blue?"`.
->
-> InfoForge publishes no port of its own. kiwix-serve is on `127.0.0.1:8081` for browsing.
-> Inside the container `infoforge serve ...` (the podman lifecycle) is **not used**: `kiwix_url`
-> points at the `kiwix` service instead. Config, ZIMs and the event log are on volumes/mounts and
-> survive image updates; `docker compose down -v` deletes the log volume (config and ZIMs are yours,
-> on the host). Back up: `docker run --rm -v infoforge-state:/state:ro -v "$PWD":/backup alpine tar czf /backup/infoforge-state.tgz -C /state .`
-> Details: [docs/deploy/docker.md](docs/deploy/docker.md).
+## Run in Docker
+
+1. **Compose files:** `cd deploy/compose && cp infoforge.config.example.yaml infoforge.config.yaml`
+   (set `model_id` and `base_url`; list your ZIM under `zims:`), and put the `.zim` in `./zims/`.
+2. **Start kiwix:** `docker compose up -d kiwix` (Podman rootless: `KIWIX_USER=0 podman-compose up -d kiwix`).
+3. **Ask:** `docker compose run --rm infoforge doctor`, then
+   `docker compose run --rm infoforge ask "Why is the sky blue?"`.
+
+InfoForge publishes no port of its own. kiwix-serve is on `127.0.0.1:8081` for browsing.
+Inside the container `infoforge serve ...` (the podman lifecycle) is **not used**: `kiwix_url`
+points at the `kiwix` service instead. Config, ZIMs and the event log are on volumes/mounts and
+survive image updates; `docker compose down -v` deletes the log volume (config and ZIMs are yours,
+on the host). Back up: `docker run --rm -v infoforge-state:/state:ro -v "$PWD":/backup alpine tar czf /backup/infoforge-state.tgz -C /state .`
+Details: [docs/deploy/docker.md](docs/deploy/docker.md).
 
 ## The CLI
 
