@@ -24,6 +24,8 @@ MARKDOWN_SUFFIXES = (".md", ".markdown")
 class ZimifyError(InfoForgeError):
     """Input directory missing, or the zim build failed."""
 
+    code = "zimify_failed"
+
 
 def _have(tool: str) -> bool:
     return shutil.which(tool) is not None
