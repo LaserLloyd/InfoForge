@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+
+import pytest
 
 from infoforge import logging_
 
@@ -45,3 +48,86 @@ def test_logging_never_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("INFOFORGE_LOG", str(tmp_path / "log.jsonl"))
     monkeypatch.setattr(logging_.json, "dumps", lambda *a, **k: 1 / 0)
     logging_.event("ask")  # must not raise
+
+
+# ------------------------------------------------------------ privacy (2.1)
+
+def test_questions_are_hashed_by_default():
+    fields = logging_.question_fields("Who built the Eiffel Tower?")
+    assert set(fields) == {"question_hmac", "question_chars"}
+    assert fields["question_chars"] == len("Who built the Eiffel Tower?")
+    assert len(fields["question_hmac"]) == 16
+    assert "Eiffel" not in json.dumps(fields)
+    # Stable: the same question hashes the same, so repeats are visible.
+    assert logging_.question_fields("Who built the Eiffel Tower?") == fields
+
+
+def test_questions_are_stored_only_when_opted_in():
+    assert logging_.question_fields("hello", keep=True) == {"question": "hello"}
+
+
+def test_log_rotates_at_the_size_limit_and_keeps_a_few_files(tmp_path, monkeypatch):
+    path = tmp_path / "log.jsonl"
+    monkeypatch.setenv("INFOFORGE_LOG", str(path))
+    monkeypatch.setattr(logging_, "MAX_BYTES", 200)
+    monkeypatch.setattr(logging_, "KEEP", 2)
+    for i in range(40):
+        logging_.event("ask", n=i, pad="x" * 40)
+    names = sorted(p.name for p in tmp_path.glob("log.jsonl*"))
+    assert names == ["log.jsonl", "log.jsonl.1", "log.jsonl.2"]
+    assert not (tmp_path / "log.jsonl.3").exists()
+    newest = read(path)
+    assert newest and newest[-1]["n"] == 39
+
+
+def test_rotation_ignores_a_missing_file(tmp_path):
+    logging_._rotate(tmp_path / "absent.jsonl")  # must not raise
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
+def test_log_file_is_created_0600_and_tightened_if_loose(tmp_path, monkeypatch):
+    path = tmp_path / "state" / "log.jsonl"
+    monkeypatch.setenv("INFOFORGE_LOG", str(path))
+    logging_.event("ask")
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert path.parent.stat().st_mode & 0o777 == 0o700
+    path.chmod(0o644)
+    logging_.event("ask")
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
+# ----------------------------------- review fix (opus): keyed question digest
+
+def test_question_digest_is_keyed_not_a_plain_sha256(tmp_path, monkeypatch):
+    # An unkeyed SHA-256 of a short question lets anyone holding the log
+    # confirm a guessed question by hashing it.
+    import hashlib
+    monkeypatch.setenv("INFOFORGE_LOG", str(tmp_path / "a" / "log.jsonl"))
+    question = "Who built the Eiffel Tower?"
+    digest = logging_.question_fields(question)["question_hmac"]
+    assert digest != hashlib.sha256(question.encode("utf-8")).hexdigest()[:16]
+    key_file = tmp_path / "a" / logging_.KEY_NAME
+    assert len(key_file.read_bytes()) == 32
+    # Another install (another key) produces another digest for the same text.
+    monkeypatch.setenv("INFOFORGE_LOG", str(tmp_path / "b" / "log.jsonl"))
+    assert logging_.question_fields(question)["question_hmac"] != digest
+
+
+def test_an_existing_key_is_reused_across_processes(tmp_path, monkeypatch):
+    monkeypatch.setenv("INFOFORGE_LOG", str(tmp_path / "log.jsonl"))
+    first = logging_.question_fields("q")
+    logging_._KEYS.clear()  # a fresh process: nothing cached
+    assert logging_.question_fields("q") == first
+
+
+def test_an_unusable_key_drops_the_digest_but_keeps_the_length(tmp_path, monkeypatch):
+    monkeypatch.setenv("INFOFORGE_LOG", str(tmp_path / "log.jsonl"))
+    (tmp_path / logging_.KEY_NAME).write_bytes(b"short")
+    assert logging_.question_fields("hello") == {"question_chars": 5}
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
+def test_the_question_key_is_private(tmp_path, monkeypatch):
+    monkeypatch.setenv("INFOFORGE_LOG", str(tmp_path / "log.jsonl"))
+    logging_.question_fields("q")
+    assert (tmp_path / logging_.KEY_NAME).stat().st_mode & 0o777 == 0o600

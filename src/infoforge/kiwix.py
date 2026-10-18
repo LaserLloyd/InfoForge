@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -27,10 +28,13 @@ from pathlib import Path
 
 import requests
 
-from .config import Config, InfoForgeError
+from .config import Config
+from .errors import InfoForgeError
 from .logging_ import warn
 
 CONTAINER_NAME = "infoforge-kiwix"
+#: Image repository.  The tag is the ``kiwix_image_tag`` config key (pinned by
+#: default, never an implicit ``latest``); see :func:`image_ref`.
 IMAGE = "ghcr.io/kiwix/kiwix-serve"
 
 # kiwix-serve binds inside the container on this port; we publish it outward.
@@ -44,14 +48,35 @@ FETCH_TIMEOUT_S = 30
 class KiwixError(InfoForgeError):
     """Container or HTTP failure that the caller cannot work around."""
 
+    code = "container_failed"
+
+
+def image_ref(cfg: Config) -> str:
+    """``ghcr.io/kiwix/kiwix-serve:<tag>`` for the configured tag."""
+    return f"{IMAGE}:{cfg.kiwix_image_tag}"
+
+
+def podman_available() -> bool:
+    """True when a ``podman`` binary is on PATH.
+
+    Without it the container half of InfoForge is simply unavailable, which is
+    fine when ``kiwix_url`` points at a kiwix-serve you run yourself.
+    """
+    return shutil.which("podman") is not None
+
 
 # --------------------------------------------------------------------- podman
 
 def _podman(*args: str, check: bool = False) -> subprocess.CompletedProcess:
-    """Run podman with a fixed argv (never shell=True)."""
+    """Run podman with a fixed argv (never shell=True).
+
+    stdin is /dev/null: under ``infoforge-mcp`` (``status``/``doctor`` tools)
+    stdin is the MCP protocol stream, and a child must never inherit it.
+    """
     try:
         return subprocess.run(
             ["podman", *args],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             check=check,
@@ -59,7 +84,9 @@ def _podman(*args: str, check: bool = False) -> subprocess.CompletedProcess:
     except FileNotFoundError:
         raise KiwixError(
             "podman is not installed or not on PATH — InfoForge runs kiwix-serve "
-            "as a rootless podman container"
+            "as a rootless podman container (or set kiwix_url to a kiwix-serve "
+            "you run yourself)",
+            code="podman_missing",
         ) from None
 
 
@@ -145,7 +172,7 @@ def _run_args(cfg: Config, files: list[str]) -> list[str]:
         "--user", "root",
         "-p", f"{bind}:{cfg.kiwix_port}:{CONTAINER_PORT}",
         "-v", f"{cfg.zim_dir}:/data:z",
-        IMAGE,
+        image_ref(cfg),
         "-k",
         *[f"/data/{name}" for name in files],
     ]
@@ -171,14 +198,15 @@ def _create(cfg: Config, files: list[str]) -> None:
             if started.returncode == 0:
                 return
             err = (started.stderr or started.stdout).strip()
-        raise KiwixError(f"failed to create container {CONTAINER_NAME}: {err}")
+        raise KiwixError(f"failed to create container {CONTAINER_NAME}: {err}",
+                         code="container_failed")
 
 
 def recreate(cfg: Config) -> list[str]:
     """Force-remove and recreate the container; returns the served files."""
     files = zim_files(cfg)
     if not files:
-        raise KiwixError(_no_zims_message(cfg))
+        raise KiwixError(_no_zims_message(cfg), code="kiwix_no_zims")
     _podman("rm", "-f", CONTAINER_NAME)
     _create(cfg, files)
     return files
@@ -204,7 +232,7 @@ def ensure(cfg: Config) -> dict:
     cfg.zim_dir.mkdir(parents=True, exist_ok=True)
     files = zim_files(cfg)
     if not files:
-        raise KiwixError(_no_zims_message(cfg))
+        raise KiwixError(_no_zims_message(cfg), code="kiwix_no_zims")
 
     state = container_state()
     if state == "missing":
@@ -406,11 +434,22 @@ def search(cfg: Config, books_name: str, pattern: str, limit: int,
     return parse_search_xml(resp.text)
 
 
-def split_content_path(result_url: str) -> tuple[str | None, list[str]]:
-    """Split ``/content/<book>/<path>`` into (book, [encoded path parts])."""
+def url_root(cfg: Config) -> str:
+    """The path prefix of ``kiwix_url`` (``""``, or e.g. ``/kiwix`` behind a proxy).
+
+    kiwix-serve started with ``--urlRootLocation=/kiwix`` prefixes every link it
+    returns with that root, so it has to come off before the book is read.
+    """
+    return urllib.parse.urlparse(cfg.kiwix_url).path.rstrip("/")
+
+
+def split_content_path(result_url: str, root: str = "") -> tuple[str | None, list[str]]:
+    """Split ``[<root>]/content/<book>/<path>`` into (book, [encoded path parts])."""
     url = result_url.strip()
     if url.startswith("http"):
         url = urllib.parse.urlparse(url).path
+    if root and url.startswith(root + "/content/"):
+        url = url[len(root):]
     if not url.startswith("/content/"):
         url = "/content/" + url.lstrip("/")
     parts = [p for p in url.split("/") if p]
@@ -423,12 +462,22 @@ def split_content_path(result_url: str) -> tuple[str | None, list[str]]:
     return book, article
 
 
+def quote_book(book: str) -> str:
+    """Percent-encode a book name for use as ONE URL path segment.
+
+    The book comes from a decoded search-result URL; unquoted, a ``%3F`` or
+    ``%2F`` in it would turn into a query string or an extra path level when
+    the URL is rebuilt.
+    """
+    return urllib.parse.quote(book, safe="")
+
+
 def content_url(cfg: Config, result_url: str) -> str:
     """Human-clickable citation URL for a hit."""
-    book, article = split_content_path(result_url)
+    book, article = split_content_path(result_url, url_root(cfg))
     if book is None:
         return result_url
-    return f"{cfg.kiwix_url}/content/{book}/{'/'.join(article)}"
+    return f"{cfg.kiwix_url}/content/{quote_book(book)}/{'/'.join(article)}"
 
 
 def fetch_article(cfg: Config, result_url: str,
@@ -439,15 +488,16 @@ def fetch_article(cfg: Config, result_url: str,
     then the rendered ``/content/<book>/<path>`` page, because /raw 404s on
     some builds and entry types.
     """
-    book, article = split_content_path(result_url)
+    book, article = split_content_path(result_url, url_root(cfg))
     if book is None:
         warn(f"skipping result with unexpected URL: {result_url}")
         return None
     encoded = "/".join(article)
     get = (session or requests).get
+    quoted_book = quote_book(book)
     for url in (
-        f"{cfg.kiwix_url}/raw/{book}/content/{encoded}",
-        f"{cfg.kiwix_url}/content/{book}/{encoded}",
+        f"{cfg.kiwix_url}/raw/{quoted_book}/content/{encoded}",
+        f"{cfg.kiwix_url}/content/{quoted_book}/{encoded}",
     ):
         try:
             resp = get(url, timeout=FETCH_TIMEOUT_S)
@@ -464,11 +514,16 @@ def fetch_article(cfg: Config, result_url: str,
     return None
 
 
-def is_up(cfg: Config, session: requests.Session | None = None) -> bool:
-    """True when kiwix-serve answers at all (used by doctor/ensure)."""
+def is_up(cfg: Config, session: requests.Session | None = None,
+          timeout: float = 5) -> bool:
+    """True when kiwix-serve answers at all (used by doctor/ensure).
+
+    A refused connection returns at once; ``timeout`` bounds a server that
+    accepts and then hangs.
+    """
     get = (session or requests).get
     try:
-        resp = get(f"{cfg.kiwix_url}/", timeout=5)
+        resp = get(f"{cfg.kiwix_url}/", timeout=timeout)
     except requests.exceptions.RequestException:
         return False
     return resp.status_code < 500

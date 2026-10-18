@@ -1,0 +1,30 @@
+# InfoForge config for the compose stack. Copy to infoforge.config.yaml.
+# (A deploy/compose/.gitignore keeps your copy out of version control.)
+
+# --- the LLM -----------------------------------------------------------------
+model_id: "your-model-id-here"
+# DELIBERATELY AN UNRESOLVABLE PLACEHOLDER: a default that points at port 1234
+# on the host would silently talk to whatever LLM server (or the one you did not
+# mean to touch) happens to run there. Set it yourself:
+#   a server on the container host : http://host.docker.internal:1234/v1
+#   StudioForge in the same compose network (the DisPatch stack): http://studioforge:1234/v1
+base_url: "http://set-me.invalid/v1"
+api_key: ""
+studioforge: false
+
+# --- kiwix: a compose service, not a podman container -------------------------
+kiwix_url: "http://kiwix:8080"
+# Mounted read-only from ZIM_DIR (default ./zims) at /zims by compose.yml.
+zim_dir: "/zims"
+zims:
+  # A dated example. Kiwix renames the file each month: copy the current name from
+  # https://download.kiwix.org/zim/wikipedia/ (the quick start in docs/deploy/docker.md does it).
+  - file: "wikipedia_en-simple_all_nopic_2026-09.zim"
+    name: "Simple English Wikipedia"
+    enabled: true
+
+max_articles: 5
+max_chars: 8000
+search_pool: 15
+timeout_s: 180
+hold_wait_s: 300

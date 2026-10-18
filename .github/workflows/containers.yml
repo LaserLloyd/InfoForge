@@ -1,0 +1,272 @@
+name: Containers
+
+# OCI image ghcr.io/laserlloyd/infoforge:<version> (linux/amd64 + linux/arm64),
+# with an SBOM, SHA256SUMS, a keyless cosign signature and a GitHub
+# build-provenance attestation. InfoForge is a CLI; its companion kiwix-serve
+# image is Kiwix's own (ghcr.io/kiwix/kiwix-serve) and is not built here.
+#
+# SKELETON: written, linted with actionlint, never run. Do not push a tag to test
+# it on the live repository; use a fork, or `workflow_dispatch` with push=false.
+#
+# Channels, by tag shape:
+#   v2.0.0            -> stable. Tags: 2.0.0, stable, latest
+#   v2.1.0-beta.2     -> beta.   Tags: 2.1.0-beta.2, beta
+#
+# Dormant on purpose:
+#   * windows-sign / macos-notarize are parity stubs. InfoForge ships no Windows
+#     or macOS binary today (it needs podman and is Linux-only in practice), so
+#     they exist only so the pipeline shape matches StudioForge's. GitHub does
+#     not allow `secrets.*` in an `if:`, so `secrets-present` turns "is the
+#     secret set" into an output and the jobs gate on that.
+#   * gpu-smoke is not applicable (no GPU use) and is not included.
+#
+# Action versions are the latest majors as of 2026-10-18; pin to commit SHAs
+# before the first real tag.
+
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "deploy/compose/**"
+      - ".github/workflows/containers.yml"
+  workflow_dispatch:
+    inputs:
+      push:
+        description: "Push the image to GHCR (needs write access to the package)"
+        type: boolean
+        default: false
+      version:
+        description: "Version string to tag with (default: the ref name)"
+        type: string
+        default: ""
+
+concurrency:
+  group: containers-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/laserlloyd/infoforge
+
+jobs:
+  prepare:
+    name: version and channel
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      channel: ${{ steps.v.outputs.channel }}
+      push: ${{ steps.v.outputs.push }}
+      tags: ${{ steps.v.outputs.tags }}
+    steps:
+      - id: v
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_PUSH: ${{ inputs.push }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          raw="${INPUT_VERSION:-$REF_NAME}"
+          version="$(printf '%s' "${raw#v}" | tr '/' '-')"
+          channel=stable
+          if printf '%s' "$version" | grep -Eq -- '-(beta|rc)\.[0-9]+$'; then channel=beta; fi
+          push=false
+          if [ "$EVENT" = push ] && [ "$REF_TYPE" = tag ]; then push=true; fi
+          if [ "$EVENT" = workflow_dispatch ] && [ "$INPUT_PUSH" = true ]; then push=true; fi
+          tags="${IMAGE}:${version}"$'\n'"${IMAGE}:${channel}"
+          if [ "$channel" = stable ]; then tags="${tags}"$'\n'"${IMAGE}:latest"; fi
+          {
+            echo "version=$version"
+            echo "channel=$channel"
+            echo "push=$push"
+            echo "tags<<EOF"
+            echo "$tags"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  image:
+    name: image (${{ matrix.variant }})
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        # One variant today; the matrix keeps the shape identical to StudioForge's.
+        variant: [default]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        if: needs.prepare.outputs.push == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # A multi-platform build cannot be --load-ed, so a non-pushing run builds
+      # amd64 only (enough to prove the Dockerfile) and a pushing run builds both.
+      - name: Build (and push on tags)
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: ${{ needs.prepare.outputs.push == 'true' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          push: ${{ needs.prepare.outputs.push == 'true' }}
+          load: ${{ needs.prepare.outputs.push != 'true' }}
+          tags: ${{ needs.prepare.outputs.tags }}
+          build-args: |
+            VERSION=${{ needs.prepare.outputs.version }}
+            REVISION=${{ github.sha }}
+          sbom: false
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          ref="${IMAGE}:${{ needs.prepare.outputs.version }}"
+          if [ "${{ needs.prepare.outputs.push }}" = true ]; then docker pull "$ref"; fi
+          docker run --rm "$ref" --version
+          docker run --rm "$ref" --help >/dev/null
+          # doctor exits 1 without a config, by design; it must still print JSON.
+          docker run --rm "$ref" doctor --json > doctor.json || test $? -eq 1
+          python3 -c 'import json; json.load(open("doctor.json"))'
+
+      - name: SBOM (syft, CycloneDX JSON)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE }}:${{ needs.prepare.outputs.version }}
+          format: cyclonedx-json
+          output-file: sbom-infoforge.cdx.json
+          upload-artifact: false
+
+      - name: Install cosign
+        if: needs.prepare.outputs.push == 'true'
+        # v3 is the latest major that exists (v3.10.x); @v4 did not resolve (2026-10 review).
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign the image (keyless, by digest) and attach the SBOM
+        if: needs.prepare.outputs.push == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+          cosign attest --yes --type cyclonedx --predicate sbom-infoforge.cdx.json "${IMAGE}@${DIGEST}"
+
+      - name: Build-provenance attestation
+        if: needs.prepare.outputs.push == 'true'
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Record the digest
+        if: needs.prepare.outputs.push == 'true'
+        run: echo "${IMAGE}@${{ steps.build.outputs.digest }}" > digest-infoforge.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: supply-chain-infoforge
+          path: |
+            sbom-infoforge.cdx.json
+            digest-infoforge.txt
+          if-no-files-found: ignore
+
+  checksums:
+    name: SHA256SUMS for the supply-chain files
+    needs: [prepare, image]
+    if: needs.prepare.outputs.push == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: supply-chain-*
+          path: out
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd out
+          sha256sum *.cdx.json digest-*.txt > SHA256SUMS-containers.txt
+          cat SHA256SUMS-containers.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SHA256SUMS-containers
+          path: out/SHA256SUMS-containers.txt
+      - name: Attach to the GitHub release (if one exists)
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" out/*.cdx.json out/SHA256SUMS-containers.txt --clobber
+          else
+            echo "no GitHub release for $TAG; the files stay as workflow artifacts"
+          fi
+
+  # --------------------------------------------------------------------------
+  # Dormant parity stubs: no Windows or macOS binary exists for InfoForge.
+  # --------------------------------------------------------------------------
+  secrets-present:
+    name: which signing secrets exist
+    runs-on: ubuntu-latest
+    outputs:
+      windows: ${{ steps.s.outputs.windows }}
+      macos: ${{ steps.s.outputs.macos }}
+    steps:
+      - id: s
+        env:
+          WIN_PFX: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          MAC_CERT: ${{ secrets.APPLE_DEVELOPER_ID_CERT_BASE64 }}
+          MAC_NOTARY: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+        run: |
+          [ -n "$WIN_PFX" ] && echo "windows=true" >> "$GITHUB_OUTPUT" || echo "windows=false" >> "$GITHUB_OUTPUT"
+          { [ -n "$MAC_CERT" ] && [ -n "$MAC_NOTARY" ]; } && echo "macos=true" >> "$GITHUB_OUTPUT" || echo "macos=false" >> "$GITHUB_OUTPUT"
+
+  windows-sign:
+    name: Authenticode-sign (dormant stub)
+    needs: [prepare, secrets-present]
+    if: needs.secrets-present.outputs.windows == 'true' && needs.prepare.outputs.push == 'true'
+    runs-on: windows-latest
+    steps:
+      - name: Nothing to sign yet
+        shell: pwsh
+        run: |
+          Write-Error "InfoForge ships no Windows binary; remove this job or add a build step before adding the certificate secret."
+          exit 1
+
+  macos-notarize:
+    name: Notarize (dormant stub)
+    needs: [prepare, secrets-present]
+    if: needs.secrets-present.outputs.macos == 'true' && needs.prepare.outputs.push == 'true'
+    runs-on: macos-latest
+    steps:
+      - name: Nothing to notarize yet
+        run: |
+          echo "InfoForge ships no macOS binary; remove this job or add a build step first." >&2
+          exit 1
