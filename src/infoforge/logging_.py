@@ -6,8 +6,9 @@ here is swallowed.
 
 Privacy: the file is created mode 0600 (its directory 0700), rotated at
 ``MAX_BYTES`` keeping ``KEEP`` old files, and holds no question text unless
-``log_questions: true`` — by default only a SHA-256 prefix and the length are
-stored (see :func:`question_fields`).
+``log_questions: true`` — by default only a keyed digest (HMAC-SHA-256 with a
+random per-install key kept 0600 beside the log) and the length are stored
+(see :func:`question_fields`).
 
 Secrets never reach this file: callers pass endpoint *identifiers* (model_id,
 base_url), never api_key values, and :func:`event` drops any field whose name
@@ -17,8 +18,10 @@ looks like a credential as a second line of defence.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
+import secrets
 import sys
 import time
 from pathlib import Path
@@ -47,16 +50,63 @@ def _scrub(fields: dict) -> dict:
     }
 
 
+#: The per-install key for question digests, created beside the log.
+KEY_NAME = "question.key"
+_KEYS: dict[str, bytes] = {}
+
+
+def _question_key() -> bytes | None:
+    """A random 32-byte key, created once (mode 0600) next to the log file.
+
+    A plain SHA-256 of a question is not private: questions are short and
+    guessable, so anyone holding the log could confirm "was X asked?" by
+    hashing X.  Keyed, the digest still shows repeats but proves nothing
+    without the key.  None (digest omitted) if the key cannot be read or made.
+    """
+    path = log_path().with_name(KEY_NAME)
+    cached = _KEYS.get(str(path))
+    if cached:
+        return cached
+    for _ in range(2):
+        try:
+            key = path.read_bytes()
+        except FileNotFoundError:
+            key = None
+        except OSError:
+            return None
+        if key is not None:
+            if len(key) < 16:
+                return None  # truncated or being written by another process
+            _KEYS[str(path)] = key
+            return key
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            continue  # another process created it first: read theirs
+        except OSError:
+            return None
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(secrets.token_bytes(32))
+    return None
+
+
 def question_fields(question: str, keep: bool = False) -> dict:
     """The log fields describing a question.
 
-    By default only a short hash (enough to spot repeats) and the length are
-    kept; the text itself is stored only when ``log_questions`` is on.
+    By default only a keyed digest (enough to spot repeats, useless for
+    confirming a guessed question) and the length are kept; the text itself is
+    stored only when ``log_questions`` is on.  Never raises.
     """
     if keep:
         return {"question": question}
-    digest = hashlib.sha256(question.encode("utf-8")).hexdigest()[:16]
-    return {"question_sha256": digest, "question_chars": len(question)}
+    out: dict = {}
+    key = _question_key()
+    if key is not None:
+        out["question_hmac"] = hmac.new(key, question.encode("utf-8"),
+                                        hashlib.sha256).hexdigest()[:16]
+    out["question_chars"] = len(question)
+    return out
 
 
 def _rotate(path: Path) -> None:

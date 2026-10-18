@@ -250,7 +250,7 @@ def test_ask_notifies_progress_and_logs_hashes_not_questions(cfg, up, stub, monk
     api.ask("the secret question", cfg=cfg, ensure=False, notify=notes.append)
     assert notes == ["grounding on 2 article(s)"]
     log = (tmp_path / "log.jsonl").read_text(encoding="utf-8")
-    assert "secret" not in log and "question_sha256" in log
+    assert "secret" not in log and "question_hmac" in log
     assert "Emu War" not in log  # titles reveal the topic too
 
 
