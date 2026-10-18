@@ -182,3 +182,15 @@ def test_example_config_loads_and_sets_only_schema_keys():
     assert set(parsed) <= set(schema.BY_KEY)
     assert parsed["kiwix_port"] == 8090
     assert parsed["kiwix_image_tag"] == schema.DEFAULT_KIWIX_IMAGE_TAG
+
+
+def test_the_legacy_port_is_labelled_in_config_show(tmp_path):
+    # review fix (opus): `config show` printed `kiwix_port = 8080 [default]`
+    # while the schema (and `config schema`) say the default is 8090.
+    cfg = load(tmp_path)
+    assert cfg.kiwix_port == 8080 and cfg.sources["kiwix_port"] == "legacy_default"
+    row = next(r for r in config_mod.show(cfg)["settings"] if r["key"] == "kiwix_port")
+    assert (row["value"], row["source"]) == (8080, "legacy_default")
+    fresh = config_mod.load(tmp_path / "absent.yaml", environ={
+        "INFOFORGE_MODEL_ID": "m", "INFOFORGE_BASE_URL": "http://127.0.0.1:11234/v1"})
+    assert fresh.sources["kiwix_port"] == "default"

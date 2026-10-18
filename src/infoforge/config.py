@@ -127,7 +127,8 @@ class Config:
     hold_wait_s: int = 300
     log_questions: bool = False
     path: Path | None = None
-    #: Where each key's effective value came from: cli | env | file | default | derived.
+    #: Where each key's effective value came from:
+    #: cli | env | file | default | legacy_default | derived.
     sources: dict = field(default_factory=dict, compare=False, repr=False)
 
     @property
@@ -338,6 +339,9 @@ def load(explicit: str | os.PathLike[str] | None = None,
         raw, src, where = values[key]
         if src == "default":
             if setting.legacy_default is not schema.NO_LEGACY_DEFAULT and file_found:
+                # Labelled, so `config show` does not print 8080 as "[default]"
+                # beside a schema whose default is 8090.
+                sources[key] = "legacy_default"
                 return setting.legacy_default
             return schema.coerce(setting, setting.default, where)
         return schema.coerce(setting, raw, where)
