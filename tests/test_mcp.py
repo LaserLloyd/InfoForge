@@ -246,3 +246,26 @@ def test_server_surfaces_catalogued_errors(served, monkeypatch):
 
     out = structured(asyncio.run(go()))
     assert out["ok"] is False and out["error"]["code"] == "kiwix_unreachable"
+
+
+# ------------------------------------------- review fix: bad max_articles (opus)
+
+@pytest.mark.parametrize("bad", [0, -3, True])
+def test_bad_max_articles_is_a_usage_error_not_no_sources(served, bad):
+    # A negative count used to retrieve nothing and come back as no_sources,
+    # which the server's instructions tell the model to report as a real
+    # "the library does not cover this" answer.
+    result = mcp_server.tool_search("emu war", max_articles=bad)
+    assert result["ok"] is False
+    assert result["error"]["code"] == "usage_error" and result["exit_code"] == 2
+    asked = mcp_server.tool_ask("emu war", max_articles=bad)
+    assert asked["ok"] is False and asked["error"]["code"] == "usage_error"
+
+
+def test_good_max_articles_still_passes_through(served, monkeypatch):
+    seen = []
+    monkeypatch.setattr(retrieve, "retrieve", lambda cfg, q, max_articles=None, session=None:
+                        seen.append(max_articles) or list(SOURCES))
+    assert mcp_server.tool_search("emu war", max_articles=2)["ok"] is True
+    assert mcp_server.tool_search("emu war")["ok"] is True
+    assert seen == [2, None]
