@@ -17,7 +17,9 @@ kiwix_url: "http://kiwix:8080"
 # Mounted read-only from ZIM_DIR (default ./zims) at /zims by compose.yml.
 zim_dir: "/zims"
 zims:
-  - file: "wikipedia_en_simple_all_nopic.zim"
+  # A dated example. Kiwix renames the file each month: copy the current name from
+  # https://download.kiwix.org/zim/wikipedia/ (the quick start in docs/deploy/docker.md does it).
+  - file: "wikipedia_en-simple_all_nopic_2026-09.zim"
     name: "Simple English Wikipedia"
     enabled: true
 

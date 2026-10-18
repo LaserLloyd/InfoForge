@@ -14,7 +14,10 @@ two on a private network. The README's "Run in Docker" section is the three-step
 ```bash
 cd deploy/compose
 cp infoforge.config.example.yaml infoforge.config.yaml      # edit model_id, base_url, zims:
-mkdir -p zims && cp ~/Downloads/wikipedia_en_simple_all_nopic.zim zims/
+mkdir -p zims
+ZIM=$(curl -sL https://download.kiwix.org/zim/wikipedia/ | grep -o 'wikipedia_en-simple_all_nopic_[0-9-]*\.zim' | sort -u | tail -1)
+curl -L -o zims/$ZIM https://download.kiwix.org/zim/wikipedia/$ZIM
+sed -i.bak "s/wikipedia_en-simple_all_nopic_[0-9-]*\.zim/$ZIM/" infoforge.config.yaml && rm infoforge.config.yaml.bak
 docker compose up -d kiwix
 docker compose run --rm infoforge doctor
 docker compose run --rm infoforge ask "What is the capital of France?"
@@ -52,9 +55,9 @@ start kiwix-serve"): that means the `kiwix` service is down, not InfoForge; `doc
 - Config and ZIMs are host files you own; the event log is on the `infoforge-state` volume.
 - There is **no database and no schema**, so there is nothing to migrate and no pre-migration
   snapshot: the only version-sensitive file is `config.yaml`, which you keep. `docker compose pull &&
-  docker compose up -d` is safe; `docker compose --profile cli down -v` deletes only the log (a plain
-  `down -v` leaves the volume, because the `infoforge` service that declares it sits behind the `cli`
-  profile; verified with Compose v5.6).
+  docker compose up -d` is safe. `docker compose down` keeps the log volume; `docker compose --profile cli down -v`
+  deletes it. A plain `down -v` does not, because the `infoforge` service that declares the volume sits
+  behind the `cli` profile (checked with Compose v5.6.0: plain `down -v` left the volume, the profiled form removed it).
 - The container runs as uid 1000; the ZIM directory only needs to be readable by it.
 
 ## Backup and restore

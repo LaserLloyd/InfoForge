@@ -114,7 +114,7 @@ class Config:
     studioforge: bool = False
     fallbacks: tuple[Endpoint, ...] = ()
     kiwix_bind: str = "127.0.0.1"
-    kiwix_port: int = 8080
+    kiwix_port: int = 8090
     kiwix_url: str = ""
     kiwix_image_tag: str = schema.DEFAULT_KIWIX_IMAGE_TAG
     zim_dir: Path = field(default_factory=lambda: Path.home() / "zims")
