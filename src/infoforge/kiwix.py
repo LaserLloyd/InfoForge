@@ -68,10 +68,15 @@ def podman_available() -> bool:
 # --------------------------------------------------------------------- podman
 
 def _podman(*args: str, check: bool = False) -> subprocess.CompletedProcess:
-    """Run podman with a fixed argv (never shell=True)."""
+    """Run podman with a fixed argv (never shell=True).
+
+    stdin is /dev/null: under ``infoforge-mcp`` (``status``/``doctor`` tools)
+    stdin is the MCP protocol stream, and a child must never inherit it.
+    """
     try:
         return subprocess.run(
             ["podman", *args],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             check=check,

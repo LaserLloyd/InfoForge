@@ -395,3 +395,17 @@ def test_licence_lookup_matches_a_percent_encoded_book(cfg):
     assert "/content/my%20notes%2B/" in url
     assert named.license_for_url(url) == "CC0"
 
+
+
+def test_podman_never_inherits_stdin(monkeypatch):
+    # review fix (opus): under infoforge-mcp, stdin is the protocol stream; the
+    # status/doctor tools run podman, which must not be able to read it.
+    import subprocess
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    kiwix._podman("ps")
+    assert seen["stdin"] is subprocess.DEVNULL
