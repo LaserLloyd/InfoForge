@@ -135,6 +135,36 @@ def test_version_flag(capsys):
     assert "infoforge-mcp" in capsys.readouterr().out
 
 
+def test_build_server_passes_the_package_version_when_the_sdk_takes_one(monkeypatch):
+    """2.x MCPServer accepts version= (reported in the initialize handshake); 1.x
+    FastMCP does not, and build_server must fall back rather than fail."""
+    seen = {}
+
+    class Modern:
+        def __init__(self, name, *, instructions, version):
+            seen.update(name=name, instructions=instructions, version=version)
+
+        def tool(self, **kwargs):
+            return lambda fn: fn
+
+    class Legacy:
+        def __init__(self, name, *, instructions):
+            seen.update(name=name, instructions=instructions, version="absent")
+
+        def tool(self, **kwargs):
+            return lambda fn: fn
+
+    from infoforge import __version__
+    monkeypatch.setattr(mcp_server, "_server_class", lambda: Modern)
+    monkeypatch.setattr(mcp_server, "_read_only_annotations", lambda: None)
+    mcp_server.build_server()
+    assert seen == {"name": "infoforge", "instructions": mcp_server.INSTRUCTIONS,
+                    "version": __version__}
+    monkeypatch.setattr(mcp_server, "_server_class", lambda: Legacy)
+    mcp_server.build_server()
+    assert seen["version"] == "absent"
+
+
 # ----------------------------------------- the real server, in-memory client
 
 pytest.importorskip("mcp")
