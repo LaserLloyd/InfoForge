@@ -4,6 +4,11 @@ Deliberately dumb: one JSON object per line, best-effort, never fatal.  A
 broken or unwritable log must not take an answer down with it, so every failure
 here is swallowed.
 
+Privacy: the file is created mode 0600 (its directory 0700), rotated at
+``MAX_BYTES`` keeping ``KEEP`` old files, and holds no question text unless
+``log_questions: true`` — by default only a SHA-256 prefix and the length are
+stored (see :func:`question_fields`).
+
 Secrets never reach this file: callers pass endpoint *identifiers* (model_id,
 base_url), never api_key values, and :func:`event` drops any field whose name
 looks like a credential as a second line of defence.
@@ -11,6 +16,7 @@ looks like a credential as a second line of defence.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -18,6 +24,10 @@ import time
 from pathlib import Path
 
 DEFAULT_LOG_PATH = Path("~/.local/state/infoforge/log.jsonl")
+
+#: Rotate when the log reaches this size; keep this many rotated files.
+MAX_BYTES = 1_000_000
+KEEP = 3
 
 # Field names that must never be written, whatever a caller passes.
 _SECRET_HINTS = ("api_key", "apikey", "token", "secret", "password", "authorization")
@@ -37,16 +47,47 @@ def _scrub(fields: dict) -> dict:
     }
 
 
+def question_fields(question: str, keep: bool = False) -> dict:
+    """The log fields describing a question.
+
+    By default only a short hash (enough to spot repeats) and the length are
+    kept; the text itself is stored only when ``log_questions`` is on.
+    """
+    if keep:
+        return {"question": question}
+    digest = hashlib.sha256(question.encode("utf-8")).hexdigest()[:16]
+    return {"question_sha256": digest, "question_chars": len(question)}
+
+
+def _rotate(path: Path) -> None:
+    """Shift ``log.jsonl`` -> ``.1`` -> ``.2`` ... once it is over MAX_BYTES."""
+    try:
+        if path.stat().st_size < MAX_BYTES:
+            return
+    except OSError:
+        return
+    for i in range(KEEP, 0, -1):
+        src = path if i == 1 else path.with_name(f"{path.name}.{i - 1}")
+        dst = path.with_name(f"{path.name}.{i}")
+        if src.exists():
+            os.replace(src, dst)
+
+
 def event(kind: str, **fields) -> None:
     """Append one event.  Best effort — logging never raises."""
     record = {"ts": time.time(), "event": kind}
     record.update(_scrub(fields))
     try:
         path = log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        _rotate(path)
         line = json.dumps(record, default=str, ensure_ascii=False)
-        with path.open("a", encoding="utf-8") as fh:
+        # 0600 at creation, so there is no window where it is world-readable.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
+        if os.name == "posix" and (path.stat().st_mode & 0o077):
+            os.chmod(path, 0o600)  # an older, looser file is tightened too
     except Exception:  # pragma: no cover - logging is never fatal
         pass
 

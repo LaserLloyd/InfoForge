@@ -1,0 +1,4 @@
+[1] Emu War  (score 12.0, 15 chars)
+    http://127.0.0.1:18080/content/w/Emu_War
+[2] Émeu é "quoted"  (score 3.2, 18 chars)
+    http://127.0.0.1:18080/content/w/X

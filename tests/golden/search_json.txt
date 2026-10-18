@@ -1,0 +1,17 @@
+{
+  "query": "emu war",
+  "sources": [
+    {
+      "title": "Emu War",
+      "url": "http://127.0.0.1:18080/content/w/Emu_War",
+      "score": 12.0,
+      "chars": 15
+    },
+    {
+      "title": "\u00c9meu \u00e9 \"quoted\"",
+      "url": "http://127.0.0.1:18080/content/w/X",
+      "score": 3.25,
+      "chars": 18
+    }
+  ]
+}

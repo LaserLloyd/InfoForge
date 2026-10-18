@@ -5,6 +5,6 @@ Successor of the ~/localwiki scripts: same proven retrieval pipeline
 keyword-aware truncation, CoT stripping), packaged, reranked and tested.
 """
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 __all__ = ["__version__"]

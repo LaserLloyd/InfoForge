@@ -20,3 +20,8 @@ dist/
 *.log
 log.jsonl
 scripts/scrub-rules.local.txt
+
+# Coverage / audit artefacts
+.coverage
+htmlcov/
+requirements.audit.txt

@@ -113,7 +113,7 @@ def test_split_content_path_rejects_an_empty_url():
 
 def test_content_url_is_absolute(cfg):
     assert kiwix.content_url(cfg, "/content/wiki/Emu_War") == \
-        "http://127.0.0.1:8080/content/wiki/Emu_War"
+        "http://127.0.0.1:18080/content/wiki/Emu_War"
 
 
 def test_fetch_article_falls_back_from_raw_to_content(cfg):
@@ -156,7 +156,7 @@ def test_run_args_are_fixed_argv_with_explicit_zim_paths(cfg):
 
 def test_run_args_publish_uses_the_configured_bind(cfg):
     args = kiwix._run_args(cfg, ["a.zim"])
-    assert args[args.index("-p") + 1] == "127.0.0.1:8080:8080"
+    assert args[args.index("-p") + 1] == "127.0.0.1:18080:8080"
 
 
 # ------------------------------------------------------- container lifecycle
@@ -279,3 +279,86 @@ def test_podman_started_epoch_parses_podman_timestamps(cfg, monkeypatch):
         FakePodman(started="2026-08-20 09:48:48.54468448 +0900 JST"),
     )
     assert kiwix._container_started_epoch() > 0
+
+
+# ----------------------------------------------------------- 2.1 hardening
+
+def test_book_segment_is_quoted_in_citation_and_fetch_urls(cfg):
+    # A book name that decodes to "x?y/z" must stay ONE path segment.
+    hostile = "/content/x%3Fy%2Fz/A"
+    book, _ = kiwix.split_content_path(hostile)
+    assert book == "x?y/z"
+    assert kiwix.content_url(cfg, hostile) == "http://127.0.0.1:18080/content/x%3Fy%2Fz/A"
+    session = FakeSession([FakeResponse(200, "<p>t</p>")])
+    kiwix.fetch_article(cfg, hostile, session=session)
+    url = session.calls[0]["url"]
+    assert url == "http://127.0.0.1:18080/raw/x%3Fy%2Fz/content/A"
+    assert "?" not in url
+
+
+def test_quote_book_leaves_ordinary_names_alone():
+    assert kiwix.quote_book("wikipedia_en_all_nopic") == "wikipedia_en_all_nopic"
+
+
+def test_the_image_is_pinned_by_the_configured_tag(cfg):
+    from dataclasses import replace
+    assert kiwix.image_ref(cfg) == f"ghcr.io/kiwix/kiwix-serve:{cfg.kiwix_image_tag}"
+    assert cfg.kiwix_image_tag != "latest"
+    pinned = replace(cfg, kiwix_image_tag="3.7.0")
+    args = kiwix._run_args(pinned, ["a.zim"])
+    assert "ghcr.io/kiwix/kiwix-serve:3.7.0" in args
+    assert "ghcr.io/kiwix/kiwix-serve" not in args  # never the bare, floating name
+
+
+def test_missing_podman_is_a_catalogued_error(monkeypatch):
+    import subprocess
+
+    import pytest
+
+    def boom(*a, **k):
+        raise FileNotFoundError("podman")
+    monkeypatch.setattr(subprocess, "run", boom)
+    with pytest.raises(kiwix.KiwixError) as exc:
+        kiwix.container_state()
+    assert exc.value.code == "podman_missing"
+    assert "kiwix_url" in str(exc.value)
+
+
+def test_podman_available_follows_path(monkeypatch):
+    monkeypatch.setattr(kiwix.shutil, "which", lambda name: None)
+    assert kiwix.podman_available() is False
+    monkeypatch.setattr(kiwix.shutil, "which", lambda name: "/usr/bin/podman")
+    assert kiwix.podman_available() is True
+
+
+def test_no_enabled_zims_has_its_own_code(cfg, monkeypatch):
+    from dataclasses import replace
+
+    import pytest
+
+    from infoforge.config import Zim
+    monkeypatch.setattr(kiwix, "_podman", FakePodman())
+    cfg2 = replace(cfg, zims=(Zim(file="absent.zim", name="missing"),))
+    with pytest.raises(kiwix.KiwixError) as exc:
+        kiwix.ensure(cfg2)
+    assert exc.value.code == "kiwix_no_zims"
+    with pytest.raises(kiwix.KiwixError) as exc:
+        kiwix.recreate(cfg2)
+    assert exc.value.code == "kiwix_no_zims"
+
+
+def test_is_up_passes_its_timeout_through(cfg):
+    seen = {}
+
+    class S:
+        def get(self, url, timeout=None, **kw):
+            seen["timeout"] = timeout
+            return FakeResponse(200)
+    assert kiwix.is_up(cfg, session=S(), timeout=2) is True
+    assert seen["timeout"] == 2
+    assert kiwix.is_up(cfg, session=S()) is True
+    assert seen["timeout"] == 5
+
+
+def test_is_up_is_false_on_a_server_error(cfg):
+    assert kiwix.is_up(cfg, session=FakeSession([FakeResponse(503)])) is False

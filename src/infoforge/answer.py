@@ -65,6 +65,7 @@ class LLMRequestError(InfoForgeError):
     """A 4xx that means the request itself is wrong — not worth a fallback."""
 
     exit_code = EXIT_CONFIG
+    code = "llm_rejected"
 
 
 @dataclass

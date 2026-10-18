@@ -1,17 +1,36 @@
 [project]
 name = "infoforge"
-version = "2.0.0"
+version = "2.1.0"
 description = "Ask questions grounded in local Kiwix ZIM archives with a local LLM."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["kiwix", "zim", "wikipedia", "rag", "mcp", "offline"]
 dependencies = [
     "requests>=2.31",
     "pyyaml>=6.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/LaserLloyd/InfoForge"
+Changelog = "https://github.com/LaserLloyd/InfoForge/blob/main/CHANGELOG.md"
+Security = "https://github.com/LaserLloyd/InfoForge/blob/main/SECURITY.md"
+
+[project.optional-dependencies]
+# MCP server (stdio): `infoforge-mcp`.  Optional so the CLI stays two-dependency.
+mcp = ["mcp>=1.23,<3"]
+# Marker extra for the DisPatch add-on (src/infoforge_dispatch).  The module
+# needs nothing beyond the base install; the extra exists so that
+# `pip install infoforge[dispatch]` documents intent.
+dispatch = []
+
 [project.scripts]
 infoforge = "infoforge.cli:main"
+infoforge-mcp = "infoforge.mcp_server:main"
+
+[project.entry-points."dispatch.extensions"]
+infoforge = "infoforge_dispatch:EXTENSION"
 
 [dependency-groups]
 dev = [
@@ -23,7 +42,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/infoforge"]
+packages = ["src/infoforge", "src/infoforge_dispatch"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

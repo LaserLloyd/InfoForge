@@ -1,8 +1,16 @@
 # InfoForge configuration — copy to ~/.config/infoforge/config.yaml and edit.
 #
-# The real file lives OUTSIDE the repo (default ~/.config/infoforge/config.yaml,
-# override with the INFOFORGE_CONFIG environment variable).  Every URL below is
-# a placeholder: put your own endpoints in your own copy, never in the repo.
+# The real file lives OUTSIDE the repo (default
+# $XDG_CONFIG_HOME/infoforge/config.yaml, i.e. ~/.config/infoforge/config.yaml;
+# override with --config or the INFOFORGE_CONFIG environment variable).  Every
+# URL below is a placeholder: put your own endpoints in your own copy, never in
+# the repo.
+#
+# Every key can also be set from the environment as INFOFORGE_<KEY> (for
+# example INFOFORGE_MAX_ARTICLES=3; list keys take a JSON list).  Precedence:
+# command-line flag > environment > this file > default.
+#   infoforge config show      the effective values and where each came from
+#   infoforge config schema    every key with type, default, range and env name
 
 # ---------------------------------------------------------------- the LLM brain
 # model_id is REQUIRED.  InfoForge refuses to guess a model.
@@ -11,7 +19,9 @@ model_id: "your-model-id-here"
 # Any OpenAI-compatible /v1 endpoint (LM Studio, llama.cpp, vLLM, a cloud API).
 base_url: "http://127.0.0.1:1234/v1"
 
-# Leave empty for a local server that does not check credentials.
+# Leave empty for a local server that does not check credentials.  Prefer the
+# INFOFORGE_API_KEY environment variable over a key in this file; if you do put
+# one here, keep the file mode 600 (`infoforge doctor` checks).
 api_key: ""
 
 # Set true only when base_url points at a StudioForge server.  It adds
@@ -28,20 +38,32 @@ fallbacks:
 
 # ------------------------------------------------------------------ kiwix-serve
 # kiwix_url is derived from kiwix_bind/kiwix_port when left unset.
+# Keep the bind on loopback: kiwix-serve has no authentication.
 kiwix_bind: "127.0.0.1"
-kiwix_port: 8080
-# kiwix_url: "http://127.0.0.1:8080"
+# 8090, not 8080: 8080 is the StudioForge panel's port on machines that run both.
+# (A config file that omits kiwix_port keeps the old default of 8080.)
+kiwix_port: 8090
+# Bring your own kiwix-serve (any OS, no podman): set kiwix_url to it and do not
+# run `infoforge serve`.
+# kiwix_url: "http://127.0.0.1:8090"
+
+# The kiwix-serve image tag the container is created from.  Pinned on purpose;
+# pull it yourself:  podman pull ghcr.io/kiwix/kiwix-serve:3.8.2
+kiwix_image_tag: "3.8.2"
 
 # Where the .zim archives live.  Never inside the repo.
 zim_dir: "~/zims"
 
 # The enabled-ZIM registry (this replaces the old zims.json).
-# `file` is the filename inside zim_dir; kiwix-serve reports a book's name as
+# `file` is a bare filename inside zim_dir; kiwix-serve reports a book's name as
 # the filename minus ".zim", which is what the search books.name filter wants.
+# `license` (optional) is printed in `ask` attribution; the default is
+# "CC BY-SA 4.0" for Wikipedia-family ZIMs and "unknown" for anything else.
 zims:
   - file: "wikipedia_en_all_nopic.zim"
     name: "English Wikipedia"
     enabled: true
+    license: "CC BY-SA 4.0"
 
 # --------------------------------------------------------------------- tuning
 max_articles: 5      # articles handed to the LLM as sources
@@ -51,3 +73,8 @@ timeout_s: 180       # LLM request timeout in seconds
 hold_wait_s: 300     # max seconds to wait out a busy endpoint (HTTP 503/429,
                      # e.g. StudioForge's priority_hold) before falling back;
                      # 0 = fail fast to the next endpoint
+
+# -------------------------------------------------------------------- privacy
+# The event log (~/.local/state/infoforge/log.jsonl, mode 600, rotated) stores
+# only a hash and the length of each question.  Set true to store the text too.
+log_questions: false

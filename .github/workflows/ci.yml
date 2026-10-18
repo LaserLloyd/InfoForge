@@ -13,14 +13,49 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Sync the locked environment
-        run: uv sync --locked
+      - name: Sync the locked environment (with the MCP extra)
+        run: uv sync --locked --extra mcp
 
-      - name: Tests
-        run: uv run pytest
+      - name: Tests with a coverage gate
+        # tests/conftest.py fails any test that opens a real socket or runs podman.
+        run: |
+          uv run --with coverage coverage run --source=src -m pytest
+          uv run --with coverage coverage report --fail-under=80
 
       - name: Lint
         run: uvx ruff@0.16.5 check .
 
+      - name: Generated docs are current (docs/reference)
+        run: uv run python scripts/gen_docs.py --check
+
       - name: Privacy scanner self-test
         run: uv run python scripts/scrub_check.py --selftest
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Audit the locked dependency set (pip-audit)
+        run: |
+          uv export --locked --all-extras --no-emit-project --no-hashes -o requirements.audit.txt
+          uvx pip-audit -r requirements.audit.txt --no-deps --disable-pip
+
+  mcp-compat:
+    # The [mcp] extra allows mcp>=1.23,<3: prove both ends of that range work.
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        mcp: ["mcp==1.23.0", "mcp>=2,<3"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Server tests against ${{ matrix.mcp }}
+        run: |
+          uv venv
+          uv pip install -e . pytest "${{ matrix.mcp }}"
+          uv run --no-sync pytest tests/test_mcp.py

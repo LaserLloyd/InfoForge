@@ -187,7 +187,7 @@ def test_retrieve_fetches_cleans_and_truncates(cfg):
     assert len(sources) == 1
     assert sources[0].title == "Emu War"
     assert sources[0].text == "The Emu War was a 1932 operation."
-    assert sources[0].url.startswith("http://127.0.0.1:8080/content/")
+    assert sources[0].url.startswith("http://127.0.0.1:18080/content/")
 
 
 def test_retrieve_skips_a_disambiguation_body_when_alternatives_exist(cfg):
