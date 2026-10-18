@@ -129,3 +129,15 @@ def test_prep_dir_is_rebuilt_from_scratch(docs, tmp_path, monkeypatch):
     stale.write_text("old", encoding="utf-8")
     second = zimify(docs, tmp_path / "out.zim")
     assert not (second["prep_dir"] / "stale.html").exists()
+
+
+def test_zimify_dot_takes_the_folder_name_as_title(docs, tmp_path, monkeypatch):
+    # review fix (opus): `infoforge zimify .` gave --title= (empty), which
+    # zimwriterfs refuses: Title is mandatory metadata.
+    monkeypatch.setattr(zimify_mod, "_have", lambda tool: False)
+    monkeypatch.chdir(docs)
+    from pathlib import Path
+    report = zimify(Path("."), tmp_path / "out.zim")
+    assert "--title=docs" in report["command"]
+    assert "<title>docs</title>" in (report["prep_dir"] / "index.html").read_text(
+        encoding="utf-8")
