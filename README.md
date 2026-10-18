@@ -114,10 +114,14 @@ upgrade kiwix-serve: `podman pull ghcr.io/kiwix/kiwix-serve:<tag>`, set
 3. **Ask:** `docker compose run --rm infoforge doctor`, then
    `docker compose run --rm infoforge ask "Why is the sky blue?"`.
 
-InfoForge publishes no port of its own. kiwix-serve is on `127.0.0.1:8081` for browsing.
+InfoForge publishes no port of its own. kiwix-serve is on `127.0.0.1:8090` for browsing (the
+same default as a native install; `KIWIX_PORT=…` in `deploy/compose/.env` moves it). The image is
+built locally from the clone by `compose run`/`compose build`; `INFOFORGE_TAG` (default `2.1.0`)
+names it.
 Inside the container `infoforge serve ...` (the podman lifecycle) is **not used**: `kiwix_url`
 points at the `kiwix` service instead. Config, ZIMs and the event log are on volumes/mounts and
-survive image updates; `docker compose down -v` deletes the log volume (config and ZIMs are yours,
+survive image updates; `docker compose --profile cli down -v` deletes the log volume (plain `down -v`
+leaves it: the `infoforge` service lives behind the `cli` profile; config and ZIMs are yours,
 on the host). Back up: `docker run --rm -v infoforge-state:/state:ro -v "$PWD":/backup alpine tar czf /backup/infoforge-state.tgz -C /state .`
 Details: [docs/deploy/docker.md](docs/deploy/docker.md).
 
@@ -381,7 +385,8 @@ what make the tool trustworthy:
 ### MCP server
 
 ```bash
-pip install 'infoforge[mcp]'        # or: uv tool install 'infoforge[mcp]'
+# InfoForge is not on PyPI: install from the clone (the [mcp] extra adds the SDK)
+uv tool install '.[mcp]'            # or: pip install '.[mcp]'
 infoforge-mcp [--config PATH]       # stdio
 ```
 
@@ -398,7 +403,8 @@ result), and there is deliberately no tool for `serve` or `zimify`. Requires
 ### DisPatch add-on
 
 ```bash
-uv pip install --python .venv/bin/python 'infoforge[dispatch]'   # in DisPatch's environment
+# from the InfoForge clone, into DisPatch's own environment (not on PyPI)
+uv pip install --python /path/to/DisPatch_Chat/backend/.venv/bin/python '/path/to/InfoForge[dispatch]'
 ```
 
 The `dispatch.extensions` entry point `infoforge` registers one live tool,

@@ -70,6 +70,17 @@ new ranking.
 - `enabled: "false"` (a quoted string) in `zims:` silently enabled the ZIM.
 - `zims[].file` accepted backslashes (`a\b.zim`); it now must be a bare filename.
 - The installer could seed a config the CLI never read when `XDG_CONFIG_HOME` was set.
+- `zimify`: the `zimwriterfs` command it runs (or prints) lacked the `--illustration` and `--name`
+  arguments that zim-tools 3.x makes mandatory, so the build failed with "too few arguments"; a
+  48x48 `illustration.png` is now written into the prepared directory and both flags are passed.
+- README install lines pointed at PyPI (`pip install 'infoforge[mcp]'`), where InfoForge is not
+  published; they now install from the clone. `deploy/compose` defaulted `INFOFORGE_TAG` to `2.0.0`
+  (now `2.1.0`) and published kiwix on 8081 (now 8090, the native default); `docs/deploy/docker.md`
+  no longer claims `doctor` fails inside the stack.
+- `infoforge-mcp` reports its version in the MCP initialize handshake (SDK 2.x).
+- Docs said `docker compose down -v` deletes the log volume; it does not (the `infoforge` service is
+  behind the `cli` profile) — `docker compose --profile cli down -v` does. The containers workflow
+  referenced `sigstore/cosign-installer@v4`, which does not exist; it now uses `@v3`.
 
 ## [2.0.0]
 
