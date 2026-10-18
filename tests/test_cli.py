@@ -9,10 +9,10 @@ from __future__ import annotations
 import json
 
 import pytest
+from helpers import SOURCES, stub_answer, stub_retrieve  # noqa: F401
 
 from infoforge import answer as answer_mod
-from infoforge import cli, kiwix, retrieve
-from infoforge.answer import Answer
+from infoforge import cli, kiwix
 from infoforge.config import (
     EXIT_CITATION,
     EXIT_CONFIG,
@@ -20,52 +20,8 @@ from infoforge.config import (
     EXIT_NO_GROUNDING,
     EXIT_NOT_IN_SOURCES,
     EXIT_OK,
-    Endpoint,
     LLMUnreachableError,
 )
-from infoforge.retrieve import Source
-
-CONFIG_TEXT = """
-model_id: test-model
-base_url: http://127.0.0.1:11234/v1
-zim_dir: {zim_dir}
-zims:
-  - file: test.zim
-    enabled: true
-"""
-
-SOURCES = [Source(title="Emu War", url="http://127.0.0.1:18080/content/w/Emu_War",
-                  text="1932 operation.", score=12.0)]
-
-
-@pytest.fixture
-def config_file(tmp_path, monkeypatch):
-    zim_dir = tmp_path / "zims"
-    zim_dir.mkdir()
-    (zim_dir / "test.zim").write_bytes(b"x")
-    path = tmp_path / "config.yaml"
-    path.write_text(CONFIG_TEXT.format(zim_dir=zim_dir), encoding="utf-8")
-    monkeypatch.setenv("INFOFORGE_CONFIG", str(path))
-    # Never touch podman or the network from a CLI test.
-    monkeypatch.setattr(kiwix, "is_up", lambda cfg, session=None: True)
-    return path
-
-
-def stub_answer(monkeypatch, text="According to Emu War, 1932.", uncited=False,
-                verdict="answered"):
-    def fake(cfg, question, sources, session=None):
-        return Answer(text=text, endpoint=Endpoint("test-model", "http://x/v1"),
-                      cited=[] if uncited else ["Emu War"], uncited=uncited,
-                      verdict=verdict, verdict_source="model")
-    monkeypatch.setattr(answer_mod, "answer_question", fake)
-
-
-def stub_retrieve(monkeypatch, sources=SOURCES):
-    monkeypatch.setattr(
-        retrieve, "retrieve",
-        lambda cfg, q, max_articles=None, session=None: list(sources),
-    )
-
 
 # ------------------------------------------------------------------- basics
 
