@@ -137,10 +137,15 @@ def zimify(input_dir: Path, output_zim: Path, title: str = "",
     # current zim-tools (3.x): without any one of them zimwriterfs refuses the
     # build with "too few arguments".  --name is the version-independent
     # identifier of the content; the output stem is the natural choice.
+    # zim-tools 3.2 (Ubuntu 24.04's package) also validates the metadata: a
+    # LongDescription shorter than the Description is refused, and with none
+    # given the long one counts as empty.  Repeating the description satisfies
+    # it for any length.
     command = [
         "zimwriterfs", "--welcome=index.html", f"--illustration={ILLUSTRATION_NAME}",
         f"--language={language}", f"--name={output_zim.stem}",
         f"--title={title}", f"--description={description}",
+        f"--longDescription={description}",
         f"--creator={creator}", f"--publisher={publisher}",
         ".", str(output_zim),
     ]

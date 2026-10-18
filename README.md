@@ -434,12 +434,15 @@ default, range, environment variable — is
 
 ### Ports
 
-InfoForge opens no listening port of its own. The kiwix container publishes on
-`kiwix_bind:kiwix_port`. **8080 is the StudioForge panel's port**, so a
-co-located install collides with a default of 8080. Fresh configs
-(`config.example.yaml`, `install.sh`) therefore use **8090**. A config file that
-*omits* `kiwix_port` keeps the old value of 8080 — upgrading never moves a
-running container; set the key explicitly if you hit the collision.
+InfoForge itself opens no listening port; only the kiwix-serve it talks to does.
+
+| Port | Who | Notes |
+|---|---|---|
+| **8090** | kiwix-serve (host side) | The default for fresh configs (`config.example.yaml`, `install.sh`) and for the Docker compose route (`KIWIX_PORT`). Published on `kiwix_bind` (default `127.0.0.1`; leave it on loopback, kiwix-serve has no authentication). Maps to 8080 inside the kiwix container. |
+| 8080 | **StudioForge's panel**, not InfoForge | Why the default moved off 8080: a co-located install collided with it. kiwix uses 8080 only inside its container. |
+
+A config file that *omits* `kiwix_port` keeps the old value of 8080: upgrading never moves a
+running container, so set the key explicitly if you hit the collision.
 
 ### The fallback chain
 
@@ -653,6 +656,12 @@ ZIM exist; the container is running (skipped without podman); kiwix answers
 HTTP; a full-text search actually returns hits; the primary LLM is reachable;
 each fallback is reachable. It prints a table and exits non-zero if any row
 failed — so the first red row is the thing to fix.
+
+The `search` row always queries the fixed word `water` in the first enabled ZIM, to prove
+the full-text index answers. A tiny custom ZIM (for example one built with `infoforge zimify`)
+that never mentions water therefore reports `0 hit(s) for 'water'` and one FAIL even though
+everything works; confirm with `infoforge search "<a word from your docs>"` and treat that
+row as a false alarm.
 
 | Symptom | Usually |
 |---|---|

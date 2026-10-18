@@ -588,7 +588,7 @@ def selftest() -> int:
         positives = {
             "tailscale-magicdns": "kiwix at https://mybox.tailc0ffee.ts.net:8080/",  # scrub-ok: fixture
             "tailnet-id":         "tailnet is tailc0ffee00",  # scrub-ok: fixture
-            "lan-ip":             'base_url: http://192.168.3.40:1234/v1',  # scrub-ok: fixture
+            "lan-ip":             'base_url: http://192.168.77.40:1234/v1',  # scrub-ok: fixture (not a real subnet)
             "cgnat-ip":           'base_url: http://100.66.1.9:1234/v1',  # scrub-ok: fixture
             "cgnat-ip-high":      "peer is at 100.127.255.1",  # scrub-ok: fixture
             "home-path-bare":     "cd /var/home/jsmith",  # scrub-ok: fixture
