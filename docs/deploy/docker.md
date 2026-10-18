@@ -1,28 +1,13 @@
 # Running InfoForge in containers
 
-Image: `ghcr.io/laserlloyd/infoforge:<version>` (linux/amd64, linux/arm64). Docker or Podman.
+Image: `ghcr.io/laserlloyd/infoforge:<version>`, **built locally from the clone** by
+`docker compose run`/`docker compose build` (the `Containers` workflow that would publish it to
+GHCR for linux/amd64 and linux/arm64 has not been run yet). Docker or Podman.
 
 InfoForge is a **CLI, not a daemon**: it runs, answers, exits. The long-running piece is
 [`kiwix-serve`](https://github.com/kiwix/kiwix-tools) (Kiwix's own image,
 `ghcr.io/kiwix/kiwix-serve`), which serves your `.zim` files. `deploy/compose/compose.yml` pairs the
-two on a private network.
-
-## README section (for the lead to insert)
-
-> ### Run in Docker
->
-> 1. **Compose files:** `cd deploy/compose && cp infoforge.config.example.yaml infoforge.config.yaml`
->    (set `model_id` and `base_url`; list your ZIM under `zims:`), and put the `.zim` in `./zims/`.
-> 2. **Start kiwix:** `docker compose up -d kiwix` (Podman rootless: `KIWIX_USER=0 podman-compose up -d kiwix`).
-> 3. **Ask:** `docker compose run --rm infoforge doctor`, then
->    `docker compose run --rm infoforge ask "Why is the sky blue?"`.
->
-> InfoForge publishes no port of its own. kiwix-serve is on `127.0.0.1:8081` for browsing.
-> Inside the container `infoforge serve ...` (the podman lifecycle) is **not used**: `kiwix_url`
-> points at the `kiwix` service instead. Config, ZIMs and the event log are on volumes/mounts and
-> survive image updates; `docker compose down -v` deletes the log volume (config and ZIMs are yours,
-> on the host). Back up: `docker run --rm -v infoforge-state:/state:ro -v "$PWD":/backup alpine tar czf /backup/infoforge-state.tgz -C /state .`
-> Details: [docs/deploy/docker.md](docs/deploy/docker.md).
+two on a private network. The README's "Run in Docker" section is the three-step version of this page.
 
 ## Quick start
 
@@ -40,7 +25,7 @@ starts a one-off InfoForge container on the same network.
 
 | Piece | Where | Notes |
 | --- | --- | --- |
-| kiwix-serve | service `kiwix`, `ghcr.io/kiwix/kiwix-serve:3.8.2`, container port 8080, published on `127.0.0.1:${KIWIX_PORT:-8081}` | `--skipInvalid` so one half-downloaded ZIM does not take it down |
+| kiwix-serve | service `kiwix`, `ghcr.io/kiwix/kiwix-serve:3.8.2`, container port 8080, published on `127.0.0.1:${KIWIX_PORT:-8090}` (the same default as a native install's `kiwix_port`) | `--skipInvalid` so one half-downloaded ZIM does not take it down |
 | Config | `./infoforge.config.yaml` mounted read-only at `/config/config.yaml` (`INFOFORGE_CONFIG`) | git-ignored by `deploy/compose/.gitignore` |
 | ZIMs | `${ZIM_DIR:-./zims}` mounted read-only at `/zims` (InfoForge) and `/data` (kiwix) | `zim_dir: /zims` in the container config |
 | Event log | named volume `infoforge-state` at `/state` (`INFOFORGE_LOG=/state/log.jsonl`) | JSON lines, appended |
@@ -53,14 +38,13 @@ read a mode-700 home directory. The usual fix is the same one the host-mode `ser
 run it as container root, which maps to *you* (`KIWIX_USER=0`). The compose file's `:z` on the bind
 mounts relabels them on SELinux hosts and is a no-op elsewhere.
 
-## Known limit: `doctor` inside the stack
+## `doctor`, `search` and `ask` inside the stack
 
-`infoforge doctor` also checks the **podman container** (`podman is not installed or not on PATH`),
-which can never pass inside this image, so `doctor` exits 1 in the compose stack even when kiwix,
-the search and the LLM rows pass. Read the rows; ignore `container`. (Fix belongs in `src/`: skip that
-check when `kiwix_url` is explicitly configured. Reported to the owner of the code.) Likewise
-`infoforge search`/`ask` will try to start the podman container if kiwix does not answer, and fail
-with `podman is not installed`: when you see that, kiwix is down, not InfoForge.
+There is no podman in the image and none is needed: `infoforge doctor` reports the `container`
+row as `podman not installed: skipped (using the kiwix-serve at kiwix_url)` and exits 0 when the
+other rows pass (verified in the 2026-10 review). If kiwix is down, `search`/`ask` fail fast with
+`error.code: kiwix_unreachable` ("nothing answers at http://kiwix:8080 and podman is not installed to
+start kiwix-serve"): that means the `kiwix` service is down, not InfoForge; `docker compose ps kiwix`.
 
 ## Your data survives updates
 
@@ -68,7 +52,9 @@ with `podman is not installed`: when you see that, kiwix is down, not InfoForge.
 - Config and ZIMs are host files you own; the event log is on the `infoforge-state` volume.
 - There is **no database and no schema**, so there is nothing to migrate and no pre-migration
   snapshot: the only version-sensitive file is `config.yaml`, which you keep. `docker compose pull &&
-  docker compose up -d` is safe; `docker compose down -v` deletes only the log.
+  docker compose up -d` is safe; `docker compose --profile cli down -v` deletes only the log (a plain
+  `down -v` leaves the volume, because the `infoforge` service that declares it sits behind the `cli`
+  profile; verified with Compose v5.6).
 - The container runs as uid 1000; the ZIM directory only needs to be readable by it.
 
 ## Backup and restore
@@ -85,8 +71,10 @@ docker run --rm -v infoforge-state:/state -v "$PWD":/backup:ro alpine \
 ## Build
 
 ```bash
-docker build --build-arg VERSION=2.0.0 -t ghcr.io/laserlloyd/infoforge:2.0.0 .
-podman build --format docker --build-arg VERSION=2.0.0 -t ghcr.io/laserlloyd/infoforge:2.0.0 .
+docker build --build-arg VERSION=2.1.0 -t ghcr.io/laserlloyd/infoforge:2.1.0 .
+podman build --format docker --build-arg VERSION=2.1.0 -t ghcr.io/laserlloyd/infoforge:2.1.0 .
 ```
 
-`uv.lock` is tracked here, so the image installs the locked set (`uv sync --locked`).
+`uv.lock` is tracked here, so the image installs the locked set (`uv sync --locked`). `compose.yml`
+builds the same image with `INFOFORGE_TAG` (default `2.1.0`, keep it equal to `pyproject.toml`'s
+version) as both the tag and the `VERSION` label.

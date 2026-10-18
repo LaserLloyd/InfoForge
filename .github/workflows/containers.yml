@@ -161,7 +161,8 @@ jobs:
 
       - name: Install cosign
         if: needs.prepare.outputs.push == 'true'
-        uses: sigstore/cosign-installer@v4
+        # v3 is the latest major that exists (v3.10.x); @v4 did not resolve (2026-10 review).
+        uses: sigstore/cosign-installer@v3
 
       - name: Sign the image (keyless, by digest) and attach the SBOM
         if: needs.prepare.outputs.push == 'true'

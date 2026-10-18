@@ -2,3 +2,5 @@
 infoforge.config.yaml
 zims/
 .env
+# the README's backup one-liner writes this next to compose.yml
+*.tgz
