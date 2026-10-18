@@ -179,3 +179,30 @@ def test_legacy_container_is_only_retired_with_the_flag(sandbox):
     # legacy ps query must have been made - and only because of the flag
     assert any(line.startswith("podman ps -a --filter name=^localwiki-kiwix")
                for line in calls(sandbox))
+
+
+def test_uninstall_finds_the_cli_even_when_uv_tool_list_is_long(sandbox):
+    # review fix (opus): under `set -o pipefail`, `uv tool list | grep -q` failed
+    # as soon as grep exited on the first match while uv was still writing
+    # (SIGPIPE), so the CLI was reported "not installed" and left behind.
+    bindir = Path(sandbox["env"]["PATH"].split(os.pathsep)[0])
+    (bindir / "uv").write_text(
+        '#!/bin/sh\necho "uv $*" >> "$STUB_LOG"\n'
+        'if [ "$1 $2" = "tool list" ]; then\n'
+        '  echo "infoforge v2.1.0"\n'
+        '  i=0; while [ $i -lt 20000 ]; do\n'
+        '    echo "other-tool-$i v1.0.0 - padding padding padding padding"; i=$((i+1))\n'
+        '  done\n'
+        'fi\nexit 0\n', encoding="utf-8", newline="\n")
+    done = run(sandbox, "--uninstall")
+    assert done.returncode == 0, done.stderr + done.stdout
+    assert "uv tool uninstall infoforge" in calls(sandbox)
+
+
+def test_uninstall_names_the_real_log_location(sandbox):
+    sandbox["env"].pop("INFOFORGE_LOG", None)  # the CLI default, not a test override
+    done = run(sandbox, "--uninstall")
+    line = next(row for row in done.stdout.splitlines() if "logs:" in row)
+    # $HOME, not $XDG_STATE_HOME (which the sandbox sets): the CLI ignores it.
+    # (Git Bash may spell HOME as /c/... so only the tail is compared.)
+    assert line.endswith("/home/.local/state/infoforge/log.jsonl (and its question.key)"), line
