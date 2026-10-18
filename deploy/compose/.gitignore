@@ -1,0 +1,4 @@
+# Your real stack config and data never get committed.
+infoforge.config.yaml
+zims/
+.env
