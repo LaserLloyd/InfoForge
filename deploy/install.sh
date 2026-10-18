@@ -218,7 +218,14 @@ if [ "$MODE" = uninstall ]; then
     fi
 
     say "Removing the infoforge CLI"
-    if command -v uv >/dev/null 2>&1 && uv tool list 2>/dev/null | grep -q '^infoforge '; then
+    # Capture first, then grep: under `set -o pipefail`, `uv tool list | grep -q`
+    # fails whenever grep exits on the first match before uv has finished
+    # writing (SIGPIPE/EPIPE), and the CLI would be reported "not installed".
+    uv_tools=""
+    if command -v uv >/dev/null 2>&1; then
+        uv_tools="$(uv tool list 2>/dev/null || true)"
+    fi
+    if grep -q '^infoforge ' <<<"$uv_tools"; then
         uv tool uninstall infoforge
     else
         info "infoforge is not installed as a uv tool — nothing to remove"
@@ -227,7 +234,8 @@ if [ "$MODE" = uninstall ]; then
     say "Kept (delete by hand if you want them gone)"
     info "config:  $CONFIG_DIR"
     info "ZIMs:    your zim_dir (default ~/zims)"
-    info "logs:    ${XDG_STATE_HOME:-$HOME/.local/state}/infoforge"
+    # The CLI's own default (logging_.DEFAULT_LOG_PATH): it does not read XDG_STATE_HOME.
+    info "logs:    ${INFOFORGE_LOG:-$HOME/.local/state/infoforge/log.jsonl} (and its question.key)"
     info "image:   podman rmi $IMAGE_REPO:<tag>   (frees the pulled kiwix-serve image)"
     printf '\n\033[32mInfoForge is uninstalled; your data was not touched.\033[0m\n'
     exit 0

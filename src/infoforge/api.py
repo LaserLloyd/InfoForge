@@ -66,6 +66,21 @@ def load_cfg(config: str | None = None, cfg: Config | None = None) -> Config:
     return cfg if cfg is not None else config_mod.load(config)
 
 
+def check_max_articles(max_articles: int | None) -> None:
+    """Reject a ``max_articles`` override below 1 (None means "use the config").
+
+    Without this a 0 silently meant "the config value" and a negative number
+    retrieved nothing, which surfaced as ``no_sources`` -- a caller (or an MCP
+    client told to treat ``no_sources`` as a real answer) would report that the
+    library lacks the topic when the request itself was wrong.
+    """
+    if max_articles is None:
+        return
+    if isinstance(max_articles, bool) or not isinstance(max_articles, int) or max_articles < 1:
+        raise InfoForgeError(f"max_articles must be an integer >= 1, got {max_articles!r}",
+                             code="usage_error")
+
+
 def ensure_kiwix(cfg: Config, session: requests.Session | None = None,
                  notify: Notify = None) -> None:
     """Make sure kiwix-serve answers, starting the container only if needed.
@@ -166,6 +181,7 @@ def search(question: str, *, max_articles: int | None = None, text: bool = False
     if not question:
         raise InfoForgeError('search needs a query: infoforge search "..."',
                              code="usage_error")
+    check_max_articles(max_articles)
     session = session or requests.Session()
     if ensure:
         ensure_kiwix(cfg, session=session)
@@ -230,6 +246,7 @@ def _ask(cfg: Config, question: str, sources: list[retrieve.Source], *, strict: 
          notify: Notify) -> dict:
     if not question:
         raise InfoForgeError('ask needs a question: infoforge ask "..."', code="usage_error")
+    check_max_articles(max_articles)
 
     # One session for the whole run: retrieval makes a dozen-plus HTTP calls
     # to the same two hosts, and per-call connections add up.

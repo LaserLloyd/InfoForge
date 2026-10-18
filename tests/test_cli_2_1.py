@@ -431,3 +431,10 @@ def test_version_string_is_the_package_version(capsys):
 def test_answer_module_is_the_one_the_api_calls():
     # The tests above monkeypatch answer_mod.answer_question; api must look it up late.
     assert api.answer_mod is answer_mod
+
+
+def test_cli_max_articles_below_one_is_exit_2(config_file, capsys):
+    # review fix (opus): `--max-articles -1` used to search for nothing (exit 3).
+    assert cli.main(["search", "--json", "--max-articles", "-1", "emu"]) == 2
+    out = json.loads(capsys.readouterr().out)
+    assert out["error"]["code"] == "usage_error"

@@ -37,8 +37,10 @@ accounts and no telemetry. What it does expose:
 - **Config files.** `zims[].file` must be a bare filename (no `/` or `\`).
   `zimify` follows symlinks in the folder you give it and writes `<out>.zim.prep/`
   next to the output; do not point it at untrusted input.
-- **Event log.** `log.jsonl` is mode 0600 and stores a hash and length of each
-  question by default, not the text.
+- **Event log.** `log.jsonl` is mode 0600 and stores a keyed digest (HMAC under a
+  random per-install `question.key`, mode 0600, beside the log) and the length of
+  each question by default, not the text. Whoever can read `question.key` can
+  still test guesses against the digests, so treat the log directory as private.
 - **Supply chain.** The kiwix image is pinned by tag, not `latest`; digest
   pinning is not done. CI runs `pip-audit` against the locked dependency set.
 - **Outbound connections** are listed in the README ("Network use").

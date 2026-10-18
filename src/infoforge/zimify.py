@@ -110,7 +110,9 @@ def zimify(input_dir: Path, output_zim: Path, title: str = "",
 
     output_zim = Path(output_zim).expanduser().resolve()
     output_zim.parent.mkdir(parents=True, exist_ok=True)
-    title = title or input_dir.name
+    # resolve(): `zimify .` has an empty .name, and zimwriterfs refuses an
+    # empty --title (Title is mandatory ZIM metadata).
+    title = title or input_dir.resolve().name
 
     prep_dir = Path(str(output_zim) + ".prep")
     if prep_dir.exists():

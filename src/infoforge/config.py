@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import re
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -126,7 +127,8 @@ class Config:
     hold_wait_s: int = 300
     log_questions: bool = False
     path: Path | None = None
-    #: Where each key's effective value came from: cli | env | file | default | derived.
+    #: Where each key's effective value came from:
+    #: cli | env | file | default | legacy_default | derived.
     sources: dict = field(default_factory=dict, compare=False, repr=False)
 
     @property
@@ -146,7 +148,9 @@ class Config:
         """Licence label of the ZIM a ``/content/<book>/...`` URL belongs to."""
         marker = "/content/"
         if marker in url:
-            book = url.split(marker, 1)[1].split("/", 1)[0]
+            # Citation URLs carry the book percent-encoded (kiwix.quote_book),
+            # the registry holds it as a plain filename stem.
+            book = urllib.parse.unquote(url.split(marker, 1)[1].split("/", 1)[0])
             for zim in self.zims:
                 if zim.books_name == book:
                     return zim.license_label
@@ -335,6 +339,9 @@ def load(explicit: str | os.PathLike[str] | None = None,
         raw, src, where = values[key]
         if src == "default":
             if setting.legacy_default is not schema.NO_LEGACY_DEFAULT and file_found:
+                # Labelled, so `config show` does not print 8080 as "[default]"
+                # beside a schema whose default is 8090.
+                sources[key] = "legacy_default"
                 return setting.legacy_default
             return schema.coerce(setting, setting.default, where)
         return schema.coerce(setting, raw, where)
