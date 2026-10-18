@@ -56,3 +56,9 @@ line-length = 100
 # (I).  Stylistic rewrites are left out — they turned readable multi-line word
 # lists into single 900-character lines.
 select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.uv]
+# uv caches this project's own built wheel and by default only rebuilds it when
+# pyproject.toml/setup.* change; the container builds keep that cache in a persistent
+# mount with a non-editable install, so list the sources too (2026-10 review finding).
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.py" }]
