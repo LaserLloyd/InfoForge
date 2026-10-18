@@ -429,11 +429,22 @@ def search(cfg: Config, books_name: str, pattern: str, limit: int,
     return parse_search_xml(resp.text)
 
 
-def split_content_path(result_url: str) -> tuple[str | None, list[str]]:
-    """Split ``/content/<book>/<path>`` into (book, [encoded path parts])."""
+def url_root(cfg: Config) -> str:
+    """The path prefix of ``kiwix_url`` (``""``, or e.g. ``/kiwix`` behind a proxy).
+
+    kiwix-serve started with ``--urlRootLocation=/kiwix`` prefixes every link it
+    returns with that root, so it has to come off before the book is read.
+    """
+    return urllib.parse.urlparse(cfg.kiwix_url).path.rstrip("/")
+
+
+def split_content_path(result_url: str, root: str = "") -> tuple[str | None, list[str]]:
+    """Split ``[<root>]/content/<book>/<path>`` into (book, [encoded path parts])."""
     url = result_url.strip()
     if url.startswith("http"):
         url = urllib.parse.urlparse(url).path
+    if root and url.startswith(root + "/content/"):
+        url = url[len(root):]
     if not url.startswith("/content/"):
         url = "/content/" + url.lstrip("/")
     parts = [p for p in url.split("/") if p]
@@ -458,7 +469,7 @@ def quote_book(book: str) -> str:
 
 def content_url(cfg: Config, result_url: str) -> str:
     """Human-clickable citation URL for a hit."""
-    book, article = split_content_path(result_url)
+    book, article = split_content_path(result_url, url_root(cfg))
     if book is None:
         return result_url
     return f"{cfg.kiwix_url}/content/{quote_book(book)}/{'/'.join(article)}"
@@ -472,7 +483,7 @@ def fetch_article(cfg: Config, result_url: str,
     then the rendered ``/content/<book>/<path>`` page, because /raw 404s on
     some builds and entry types.
     """
-    book, article = split_content_path(result_url)
+    book, article = split_content_path(result_url, url_root(cfg))
     if book is None:
         warn(f"skipping result with unexpected URL: {result_url}")
         return None

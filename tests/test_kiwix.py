@@ -362,3 +362,36 @@ def test_is_up_passes_its_timeout_through(cfg):
 
 def test_is_up_is_false_on_a_server_error(cfg):
     assert kiwix.is_up(cfg, session=FakeSession([FakeResponse(503)])) is False
+
+
+# ------------------------------------- review fixes (opus): url root + licence
+
+def test_a_kiwix_url_with_a_root_location_is_stripped_before_the_book(cfg):
+    # kiwix-serve --urlRootLocation=/kiwix (e.g. behind a reverse proxy) returns
+    # links like /kiwix/content/<book>/<path>; the root used to be read as the
+    # book, so every fetch 404'd and retrieval found nothing.
+    from dataclasses import replace
+    rooted = replace(cfg, kiwix_url="http://127.0.0.1:18080/kiwix")
+    link = "/kiwix/content/wikipedia_en/A/Emu_War"
+    assert kiwix.split_content_path(link, kiwix.url_root(rooted)) == \
+        ("wikipedia_en", ["A", "Emu_War"])
+    assert kiwix.content_url(rooted, link) == \
+        "http://127.0.0.1:18080/kiwix/content/wikipedia_en/A/Emu_War"
+    session = FakeSession([FakeResponse(200, "<p>t</p>")])
+    assert kiwix.fetch_article(rooted, link, session=session) == "<p>t</p>"
+    assert session.calls[0]["url"] == \
+        "http://127.0.0.1:18080/kiwix/raw/wikipedia_en/content/A/Emu_War"
+    # No root configured: unchanged behaviour.
+    assert kiwix.url_root(cfg) == ""
+    assert kiwix.split_content_path("/content/w/A")[0] == "w"
+
+
+def test_licence_lookup_matches_a_percent_encoded_book(cfg):
+    from dataclasses import replace
+
+    from infoforge.config import Zim
+    named = replace(cfg, zims=(Zim(file="my notes+.zim", license="CC0"),))
+    url = kiwix.content_url(named, "/content/my%20notes%2B/A/x")
+    assert "/content/my%20notes%2B/" in url
+    assert named.license_for_url(url) == "CC0"
+

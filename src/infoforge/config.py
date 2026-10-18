@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import re
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -146,7 +147,9 @@ class Config:
         """Licence label of the ZIM a ``/content/<book>/...`` URL belongs to."""
         marker = "/content/"
         if marker in url:
-            book = url.split(marker, 1)[1].split("/", 1)[0]
+            # Citation URLs carry the book percent-encoded (kiwix.quote_book),
+            # the registry holds it as a plain filename stem.
+            book = urllib.parse.unquote(url.split(marker, 1)[1].split("/", 1)[0])
             for zim in self.zims:
                 if zim.books_name == book:
                     return zim.license_label
