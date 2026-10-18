@@ -97,6 +97,8 @@ def test_build_runs_zimwriterfs_with_fixed_argv(docs, tmp_path, monkeypatch):
     assert isinstance(calls["argv"], list)  # argv list, never a shell string
     assert calls["argv"][0] == "zimwriterfs"
     assert "--title=T" in calls["argv"]
+    # zim-tools 3.2 refuses a build whose LongDescription is shorter than the Description
+    assert "--description=D" in calls["argv"] and "--longDescription=D" in calls["argv"]
     assert "--creator=InfoForge" in calls["argv"]
     assert "--publisher=InfoForge" in calls["argv"]
     assert calls["cwd"] == report["prep_dir"]
