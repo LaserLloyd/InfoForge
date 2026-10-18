@@ -70,26 +70,48 @@ The bring-your-own mode needs no config *file* either: set `INFOFORGE_MODEL_ID`,
 
 ---
 
-## Quickstart (Linux, podman)
+## Quickstart (three steps, Docker)
+
+Runs under Docker (or `podman compose`) with no Python on the host and no managed podman
+container. You need a ZIM and a running OpenAI-compatible chat server.
 
 ```bash
-git clone https://github.com/LaserLloyd/InfoForge.git infoforge && cd infoforge  # scrub-ok: this project's own public repository URL
+# 1. Install: clone, and get a database (any ZIM from https://library.kiwix.org)
+git clone https://github.com/LaserLloyd/InfoForge.git infoforge && cd infoforge/deploy/compose  # scrub-ok: this project's own public repository URL
+mkdir -p zims && curl -L -o zims/wikipedia_en_simple_all_nopic.zim \
+  https://download.kiwix.org/zim/wikipedia/wikipedia_en_simple_all_nopic.zim
 
-# 1. get a database (any ZIM from https://library.kiwix.org)
+# 2. Configure: seed the config, set model_id and base_url (and `zims:` if you chose another ZIM), start kiwix
+cp infoforge.config.example.yaml infoforge.config.yaml && $EDITOR infoforge.config.yaml
+docker compose up -d kiwix        # Podman rootless: KIWIX_USER=0 podman-compose up -d kiwix
+
+# 3. Check everything is wired up, then ask
+docker compose run --rm infoforge doctor
+docker compose run --rm infoforge ask "Why is the sky blue?"
+```
+
+`base_url` must be reachable from inside the container: for a server on the same machine use
+`http://host.docker.internal:1234/v1` (the config example explains the other cases).
+More on this route: [Run in Docker](#run-in-docker) and [docs/deploy/docker.md](docs/deploy/docker.md).
+
+## Quickstart (Linux, podman, no Docker)
+
+The supported native setup: a `systemd --user` service plus a managed rootless
+podman container.
+
+```bash
+# 1. Install: clone, get a database, pull the pinned kiwix-serve image, run the installer
+git clone https://github.com/LaserLloyd/InfoForge.git infoforge && cd infoforge  # scrub-ok: this project's own public repository URL
 mkdir -p ~/zims
 curl -L -o ~/zims/wikipedia_en_simple_all_nopic.zim \
   https://download.kiwix.org/zim/wikipedia/wikipedia_en_simple_all_nopic.zim
+podman pull ghcr.io/kiwix/kiwix-serve:3.8.2     # the installer does not pull for you
+deploy/install.sh                               # installs the CLI, seeds the config, starts the service
 
-# 2. pull the pinned kiwix-serve image (the installer does not pull for you)
-podman pull ghcr.io/kiwix/kiwix-serve:3.8.2
-
-# 3. install the CLI, seed the config, install + start the service
-deploy/install.sh
-
-# 4. tell it about your LLM and your ZIM
+# 2. Configure: tell it about your LLM and your ZIM
 $EDITOR ~/.config/infoforge/config.yaml
 
-# 5. check everything is wired up, then ask
+# 3. Check everything is wired up, then ask
 infoforge doctor
 infoforge ask "Why is the sky blue?"
 ```
@@ -108,11 +130,9 @@ upgrade kiwix-serve: `podman pull ghcr.io/kiwix/kiwix-serve:<tag>`, set
 
 ## Run in Docker
 
-1. **Compose files:** `cd deploy/compose && cp infoforge.config.example.yaml infoforge.config.yaml`
-   (set `model_id` and `base_url`; list your ZIM under `zims:`), and put the `.zim` in `./zims/`.
-2. **Start kiwix:** `docker compose up -d kiwix` (Podman rootless: `KIWIX_USER=0 podman-compose up -d kiwix`).
-3. **Ask:** `docker compose run --rm infoforge doctor`, then
-   `docker compose run --rm infoforge ask "Why is the sky blue?"`.
+The steps are the first Quickstart above: seed `infoforge.config.yaml` (set `model_id` and `base_url`; list
+your ZIM under `zims:`), put the `.zim` in `./zims/`, `docker compose up -d kiwix`, then
+`docker compose run --rm infoforge doctor` and `... ask "..."`.
 
 InfoForge publishes no port of its own. kiwix-serve is on `127.0.0.1:8090` for browsing (the
 same default as a native install; `KIWIX_PORT=…` in `deploy/compose/.env` moves it). The image is
@@ -236,12 +256,15 @@ default, range, environment variable — is
 
 ### Ports
 
-InfoForge opens no listening port of its own. The kiwix container publishes on
-`kiwix_bind:kiwix_port`. **8080 is the StudioForge panel's port**, so a
-co-located install collides with a default of 8080. Fresh configs
-(`config.example.yaml`, `install.sh`) therefore use **8090**. A config file that
-*omits* `kiwix_port` keeps the old value of 8080 — upgrading never moves a
-running container; set the key explicitly if you hit the collision.
+InfoForge itself opens no listening port; only the kiwix-serve it talks to does.
+
+| Port | Who | Notes |
+|---|---|---|
+| **8090** | kiwix-serve (host side) | The default for fresh configs (`config.example.yaml`, `install.sh`) and for the Docker compose route (`KIWIX_PORT`). Published on `kiwix_bind` (default `127.0.0.1`; leave it on loopback, kiwix-serve has no authentication). Maps to 8080 inside the kiwix container. |
+| 8080 | **StudioForge's panel**, not InfoForge | Why the default moved off 8080: a co-located install collided with it. kiwix uses 8080 only inside its container. |
+
+A config file that *omits* `kiwix_port` keeps the old value of 8080: upgrading never moves a
+running container, so set the key explicitly if you hit the collision.
 
 ### The fallback chain
 
@@ -455,6 +478,12 @@ ZIM exist; the container is running (skipped without podman); kiwix answers
 HTTP; a full-text search actually returns hits; the primary LLM is reachable;
 each fallback is reachable. It prints a table and exits non-zero if any row
 failed — so the first red row is the thing to fix.
+
+The `search` row always queries the fixed word `water` in the first enabled ZIM, to prove
+the full-text index answers. A tiny custom ZIM (for example one built with `infoforge zimify`)
+that never mentions water therefore reports `0 hit(s) for 'water'` and one FAIL even though
+everything works; confirm with `infoforge search "<a word from your docs>"` and treat that
+row as a false alarm.
 
 | Symptom | Usually |
 |---|---|
