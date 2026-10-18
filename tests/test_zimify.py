@@ -43,6 +43,33 @@ def test_prepares_a_site_and_reports_the_command_without_zimwriterfs(
     # zim-tools requires these; a printed command without them cannot be run.
     assert "--creator=InfoForge" in report["command"]
     assert "--publisher=InfoForge" in report["command"]
+    # zim-tools 3.x also refuses ("too few arguments") without an illustration
+    # and a name (seen with zimwriterfs 3.8.0 in the 2026-10 review).
+    assert "--illustration=illustration.png" in report["command"]
+    assert "--name=out" in report["command"]
+    assert report["command"][-2:] == [".", str(tmp_path.resolve() / "out.zim")]
+
+
+def test_a_48x48_png_illustration_is_written_into_the_prepared_dir(
+        docs, tmp_path, monkeypatch):
+    import struct
+
+    monkeypatch.setattr(zimify_mod, "_have", lambda tool: False)
+    report = zimify(docs, tmp_path / "out.zim")
+    png = (report["prep_dir"] / "illustration.png").read_bytes()
+    assert png.startswith(b"\x89PNG\r\n\x1a\n")
+    width, height = struct.unpack(">II", png[16:24])      # IHDR starts at byte 16
+    assert (width, height) == (48, 48)
+    # index.html links the inputs only, not the generated illustration
+    index = (report["prep_dir"] / "index.html").read_text(encoding="utf-8")
+    assert "illustration.png" not in index
+
+
+def test_an_illustration_supplied_by_the_input_folder_is_kept(docs, tmp_path, monkeypatch):
+    monkeypatch.setattr(zimify_mod, "_have", lambda tool: False)
+    (docs / "illustration.png").write_bytes(b"mine")
+    report = zimify(docs, tmp_path / "out.zim")
+    assert (report["prep_dir"] / "illustration.png").read_bytes() == b"mine"
 
 
 def test_index_links_and_escapes_every_file(docs, tmp_path, monkeypatch):
