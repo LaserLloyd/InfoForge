@@ -3,10 +3,12 @@
 
 # --- the LLM -----------------------------------------------------------------
 model_id: "your-model-id-here"
-# An OpenAI-compatible server on the container host. Use
-# http://studioforge:1234/v1 instead when StudioForge runs in the same compose
-# network (see the DisPatch stack file).
-base_url: "http://host.docker.internal:1234/v1"
+# DELIBERATELY AN UNRESOLVABLE PLACEHOLDER: a default that points at port 1234
+# on the host would silently talk to whatever LLM server (or the one you did not
+# mean to touch) happens to run there. Set it yourself:
+#   a server on the container host : http://host.docker.internal:1234/v1
+#   StudioForge in the same compose network (the DisPatch stack): http://studioforge:1234/v1
+base_url: "http://set-me.invalid/v1"
 api_key: ""
 studioforge: false
 

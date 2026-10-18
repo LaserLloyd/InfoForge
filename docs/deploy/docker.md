@@ -44,7 +44,7 @@ starts a one-off InfoForge container on the same network.
 | Config | `./infoforge.config.yaml` mounted read-only at `/config/config.yaml` (`INFOFORGE_CONFIG`) | git-ignored by `deploy/compose/.gitignore` |
 | ZIMs | `${ZIM_DIR:-./zims}` mounted read-only at `/zims` (InfoForge) and `/data` (kiwix) | `zim_dir: /zims` in the container config |
 | Event log | named volume `infoforge-state` at `/state` (`INFOFORGE_LOG=/state/log.jsonl`) | JSON lines, appended |
-| LLM | your `base_url` | `http://host.docker.internal:1234/v1` for a server on the host; `http://studioforge:1234/v1` inside the DisPatch stack |
+| LLM | your `base_url` (the example ships `http://set-me.invalid/v1` on purpose, so nothing talks to a host port until you choose) | `http://host.docker.internal:1234/v1` for a server on the host; `http://studioforge:1234/v1` inside the DisPatch stack |
 
 ## Rootless Podman and SELinux
 
