@@ -42,88 +42,276 @@ API](#python-api).
 
 ---
 
-## Platform support (read this first)
+## Install
 
-| | Status |
+InfoForge is a command-line tool plus a `kiwix-serve` that serves your `.zim` files. Pick your platform
+below; methods are listed simplest first, and each block runs top to bottom on a fresh machine. You also
+need an OpenAI-compatible chat server (StudioForge, LM Studio, llama.cpp's `llama-server`, vLLM, or a
+remote one); the blocks use `http://127.0.0.1:1234/v1` and `your-model-id`, so change those two values in
+the config to match yours.
+
+**Ports:** InfoForge opens none. `kiwix-serve` listens on `127.0.0.1:8090`; 8080 is the StudioForge
+panel's port, which is why the default is 8090. The LLM server is wherever you point `base_url`.
+
+| Platform | Status |
 |---|---|
-| **Linux** with podman and systemd `--user` | The supported, tested setup. `deploy/install.sh` does everything. |
-| **Any OS**, bring your own `kiwix-serve` | Works. Run `kiwix-serve` however you like (native binary, Docker, another machine), set `kiwix_url` to it, and **do not use `infoforge serve`**. InfoForge needs only Python 3.12+ and an LLM endpoint; podman is never touched. `infoforge doctor` reports the container check as skipped. Tested without podman. |
-| macOS / Windows with the managed container | Not supported. The container half uses rootless podman, `--user root` and an SELinux `:z` volume flag, and a drive-letter `zim_dir` breaks podman's `-v` parsing. |
+| **Linux** with podman and systemd `--user` | The supported, tested setup. `deploy/install.sh` does everything, including the kiwix container. |
+| **Any OS**, bring your own `kiwix-serve` | Works. Run `kiwix-serve` however you like (native binary, Docker, another machine), set `kiwix_url` to it, and **do not use `infoforge serve`**. InfoForge needs only Python 3.12+ and an LLM endpoint; podman is never touched. `infoforge doctor` reports the container check as skipped. |
+| macOS / Windows with the managed container | Not supported. The container half uses rootless podman, `--user root` and an SELinux `:z` volume flag, and a drive-letter `zim_dir` breaks podman's `-v` parsing. Use Docker Compose or your own `kiwix-serve` instead. |
 
-The bring-your-own mode needs no config *file* either: set `INFOFORGE_MODEL_ID`,
-`INFOFORGE_BASE_URL`, `INFOFORGE_KIWIX_URL`, `INFOFORGE_ZIM_DIR` and
-`INFOFORGE_ZIMS` (a JSON list) and run `infoforge search --no-ensure …`.
+**The database.** Every block downloads `wikipedia_en_top_mini` (about 300 MB, the most-read articles) so
+you can try it quickly. Kiwix puts a date in every file name (and renames the file each month), so the blocks look up the
+current name instead of hard-coding it. The full text without images, `wikipedia_en_all_nopic`, is about 49 GB; use
+it by changing `wikipedia_en_top_mini` to `wikipedia_en_all_nopic` in the first download line and making
+sure the disk has room. Other ZIMs are listed at <https://library.kiwix.org>.
 
----
+### Windows
 
-## Requirements
+#### 1. Docker Desktop (simplest)
 
-- **Python 3.12+** and [uv](https://docs.astral.sh/uv/).
-- A running **kiwix-serve**: either the managed container (needs **podman**,
-  Linux — see above) or one you run yourself.
-- At least one **`.zim` file** in `~/zims`. Get one from
-  <https://library.kiwix.org> — `wikipedia_en_all_nopic.zim` (~100 GB with
-  every article, no images) is the reference; `wikipedia_en_simple_all_nopic`
-  is a few gigabytes and fine for trying this out.
-- A running **OpenAI-compatible chat server** — LM Studio, llama.cpp's
-  `llama-server`, vLLM, StudioForge, or a remote one on your own network.
+Choose this for the fewest parts: Docker runs `kiwix-serve` and the CLI, and nothing but Docker is
+installed on Windows.
 
----
+```powershell
+winget install --id Git.Git -e
+winget install --id Docker.DockerDesktop -e
+```
 
-## Quickstart (Linux, podman)
+Start Docker Desktop once and accept its first-run prompts, then open a new PowerShell window:
 
-```bash
-git clone https://github.com/LaserLloyd/InfoForge.git infoforge && cd infoforge  # scrub-ok: this project's own public repository URL
+```powershell
+git clone https://github.com/LaserLloyd/InfoForge.git
+cd InfoForge\deploy\compose
+New-Item -ItemType Directory -Force zims | Out-Null
+$ProgressPreference = 'SilentlyContinue'
+$list = (Invoke-WebRequest -UseBasicParsing https://download.kiwix.org/zim/wikipedia/).Content
+$zim = [regex]::Matches($list, 'wikipedia_en_top_mini_[0-9-]+\.zim') | ForEach-Object Value | Sort-Object -Unique | Select-Object -Last 1
+Invoke-WebRequest "https://download.kiwix.org/zim/wikipedia/$zim" -OutFile "zims\$zim"
+@"
+model_id: "your-model-id"
+base_url: "http://host.docker.internal:1234/v1"
+kiwix_url: "http://kiwix:8080"
+zim_dir: "/zims"
+zims:
+  - file: "$zim"
+    name: "Wikipedia (top articles)"
+    enabled: true
+    license: "CC BY-SA 4.0"
+"@ | Set-Content infoforge.config.yaml
+docker compose up -d kiwix
+docker compose run --rm infoforge doctor
+docker compose run --rm infoforge ask "Why is the sky blue?"
+```
 
-# 1. get a database (any ZIM from https://library.kiwix.org)
-mkdir -p ~/zims
-curl -L -o ~/zims/wikipedia_en_simple_all_nopic.zim \
-  https://download.kiwix.org/zim/wikipedia/wikipedia_en_simple_all_nopic.zim
+`doctor` checks the config, the ZIM, kiwix, a test search and your LLM; fix the first red row. The first
+`compose run` builds the CLI image from the clone. `host.docker.internal` reaches an LLM server running on
+Windows. Details: [docs/deploy/docker.md](docs/deploy/docker.md).
 
-# 2. pull the pinned kiwix-serve image (the installer does not pull for you)
-podman pull ghcr.io/kiwix/kiwix-serve:3.8.2
+| Pros | Cons |
+| --- | --- |
+| No Python or kiwix to install; config and ZIMs stay on the host | `infoforge ...` is `docker compose run --rm infoforge ...`, from `deploy\compose` |
+| Read-only image, event log on a volume | Docker Desktop must be running; the image is built locally (not published yet) |
 
-# 3. install the CLI, seed the config, install + start the service
-deploy/install.sh
+#### 2. `uv tool install` with kiwix in Docker
 
-# 4. tell it about your LLM and your ZIM
-$EDITOR ~/.config/infoforge/config.yaml
+Choose this to get a plain `infoforge` command on your `PATH`. The CLI runs natively; Docker only runs
+`kiwix-serve`.
 
-# 5. check everything is wired up, then ask
+```powershell
+winget install --id Git.Git -e
+winget install --id astral-sh.uv -e
+winget install --id Docker.DockerDesktop -e
+```
+
+Start Docker Desktop once, open a new PowerShell window, then:
+
+```powershell
+git clone https://github.com/LaserLloyd/InfoForge.git
+cd InfoForge
+uv tool install --python 3.12 .
+uv tool update-shell
+New-Item -ItemType Directory -Force $HOME\zims | Out-Null
+$ProgressPreference = 'SilentlyContinue'
+$list = (Invoke-WebRequest -UseBasicParsing https://download.kiwix.org/zim/wikipedia/).Content
+$zim = [regex]::Matches($list, 'wikipedia_en_top_mini_[0-9-]+\.zim') | ForEach-Object Value | Sort-Object -Unique | Select-Object -Last 1
+Invoke-WebRequest "https://download.kiwix.org/zim/wikipedia/$zim" -OutFile "$HOME\zims\$zim"
+New-Item -ItemType Directory -Force $HOME\.config\infoforge | Out-Null
+$zimdir = "$HOME\zims" -replace '\\', '/'
+@"
+model_id: "your-model-id"
+base_url: "http://127.0.0.1:1234/v1"
+kiwix_url: "http://127.0.0.1:8090"
+zim_dir: "$zimdir"
+zims:
+  - file: "$zim"
+    name: "Wikipedia (top articles)"
+    enabled: true
+    license: "CC BY-SA 4.0"
+"@ | Set-Content $HOME\.config\infoforge\config.yaml
+$env:ZIM_DIR = "$HOME\zims"
+docker compose -f deploy\compose\compose.yml up -d kiwix
+```
+
+Open a new PowerShell window (so the tool is on `PATH`), then:
+
+```powershell
 infoforge doctor
 infoforge ask "Why is the sky blue?"
 ```
 
-`deploy/install.sh` is idempotent — re-run it after every `git pull`. It never
-overwrites an existing config. `deploy/install.sh --uninstall` removes the
-service, the container and the CLI and **keeps your config, ZIMs and logs**.
+Do not run `infoforge serve`: it manages a podman container, which Windows does not support. If you
+prefer a native `kiwix-serve`, download the Windows build from <https://download.kiwix.org/release/kiwix-tools/>
+and run it on port 8090 instead of the last compose line.
 
-The kiwix image is **pinned by tag** (`kiwix_image_tag`, default `3.8.2`), not
-`latest`, so a pull can never silently change the server. Pull the tag yourself
-(step 2); if you skip it, podman pulls it on first container creation. To
-upgrade kiwix-serve: `podman pull ghcr.io/kiwix/kiwix-serve:<tag>`, set
-`kiwix_image_tag`, then `infoforge serve recreate`.
+| Pros | Cons |
+| --- | --- |
+| A real `infoforge` command; fastest to script and to hand to an agent | You update it yourself (`git pull`, reinstall) |
+| Only kiwix needs a container | Two moving parts: the tool and the kiwix container |
 
----
+### Linux
 
-## Run in Docker
+On a bare Ubuntu or Debian image `git`, `curl` and `podman` are missing, so the blocks install them first.
 
-1. **Compose files:** `cd deploy/compose && cp infoforge.config.example.yaml infoforge.config.yaml`
-   (set `model_id` and `base_url`; list your ZIM under `zims:`), and put the `.zim` in `./zims/`.
-2. **Start kiwix:** `docker compose up -d kiwix` (Podman rootless: `KIWIX_USER=0 podman-compose up -d kiwix`).
-3. **Ask:** `docker compose run --rm infoforge doctor`, then
-   `docker compose run --rm infoforge ask "Why is the sky blue?"`.
+#### 1. Installer script: podman and a systemd user service (simplest)
 
-InfoForge publishes no port of its own. kiwix-serve is on `127.0.0.1:8090` for browsing (the
-same default as a native install; `KIWIX_PORT=…` in `deploy/compose/.env` moves it). The image is
-built locally from the clone by `compose run`/`compose build`; `INFOFORGE_TAG` (default `2.1.0`)
-names it.
-Inside the container `infoforge serve ...` (the podman lifecycle) is **not used**: `kiwix_url`
-points at the `kiwix` service instead. Config, ZIMs and the event log are on volumes/mounts and
-survive image updates; `docker compose --profile cli down -v` deletes the log volume (plain `down -v`
-leaves it: the `infoforge` service lives behind the `cli` profile; config and ZIMs are yours,
-on the host). Back up: `docker run --rm -v infoforge-state:/state:ro -v "$PWD":/backup alpine tar czf /backup/infoforge-state.tgz -C /state .`
-Details: [docs/deploy/docker.md](docs/deploy/docker.md).
+Choose this on a Linux box with podman and systemd. One script installs the CLI with `uv`, seeds the
+config, starts the kiwix container, installs a user service that brings it back after a reboot, and runs `doctor`.
+
+```bash
+sudo apt-get update && sudo apt-get install -y git curl ca-certificates python3 podman
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source "$HOME/.local/bin/env"
+git clone https://github.com/LaserLloyd/InfoForge.git
+cd InfoForge
+mkdir -p ~/zims ~/.config/infoforge
+ZIM=$(curl -sL https://download.kiwix.org/zim/wikipedia/ | grep -o 'wikipedia_en_top_mini_[0-9-]*\.zim' | sort -u | tail -1)
+curl -L -o ~/zims/$ZIM https://download.kiwix.org/zim/wikipedia/$ZIM
+cat > ~/.config/infoforge/config.yaml <<EOF
+model_id: "your-model-id"
+base_url: "http://127.0.0.1:1234/v1"
+kiwix_port: 8090
+zim_dir: "~/zims"
+zims:
+  - file: "$ZIM"
+    name: "Wikipedia (top articles)"
+    enabled: true
+    license: "CC BY-SA 4.0"
+EOF
+podman pull ghcr.io/kiwix/kiwix-serve:3.8.2
+deploy/install.sh
+infoforge ask "Why is the sky blue?"
+```
+
+`install.sh` is idempotent, so re-run it after every `git pull`. It never overwrites an existing config,
+which is why the config is written first. It ends with `infoforge doctor`, which fails on the LLM row until
+`base_url` and `model_id` match a running server. Run `loginctl enable-linger "$USER"` if you want kiwix up
+before you log in. Other distributions: install `git`, `curl`, `python3` and `podman` with your package
+manager.
+
+| Pros | Cons |
+| --- | --- |
+| Manages the kiwix container for you, and restarts it after a reboot | Linux with rootless podman and a systemd user session only |
+| Config in `~/.config/infoforge`, nothing outside your home directory | The script writes a unit file; read `deploy/install.sh` first if you want to |
+| `deploy/install.sh --uninstall` keeps your config, ZIMs and logs | You pull the pinned kiwix image yourself (the block does) |
+
+#### 2. Docker Compose
+
+Choose this if you use Docker rather than podman, or want InfoForge isolated. Same stack as the Windows
+Docker method.
+
+```bash
+sudo apt-get update && sudo apt-get install -y git curl ca-certificates
+curl -fsSL https://get.docker.com | sh
+git clone https://github.com/LaserLloyd/InfoForge.git
+cd InfoForge/deploy/compose
+mkdir -p zims
+ZIM=$(curl -sL https://download.kiwix.org/zim/wikipedia/ | grep -o 'wikipedia_en_top_mini_[0-9-]*\.zim' | sort -u | tail -1)
+curl -L -o zims/$ZIM https://download.kiwix.org/zim/wikipedia/$ZIM
+cat > infoforge.config.yaml <<EOF
+model_id: "your-model-id"
+base_url: "http://host.docker.internal:1234/v1"
+kiwix_url: "http://kiwix:8080"
+zim_dir: "/zims"
+zims:
+  - file: "$ZIM"
+    name: "Wikipedia (top articles)"
+    enabled: true
+    license: "CC BY-SA 4.0"
+EOF
+sudo docker compose up -d kiwix
+sudo docker compose run --rm infoforge doctor
+sudo docker compose run --rm infoforge ask "Why is the sky blue?"
+```
+
+Skip the `get.docker.com` line if Docker is installed. `host.docker.internal` reaches an LLM server on this
+machine. Rootless Podman: `KIWIX_USER=0 podman-compose up -d kiwix`. Details:
+[docs/deploy/docker.md](docs/deploy/docker.md).
+
+| Pros | Cons |
+| --- | --- |
+| Read-only image, no Python on the host, event log on a volume | `infoforge ...` becomes `docker compose run --rm infoforge ...` |
+| Works with Docker or Podman | The CLI image is built locally from the clone (not published yet) |
+
+#### 3. `uv tool install` with your own kiwix-serve (any distribution)
+
+Choose this for a plain `infoforge` command without podman or Docker for the CLI. You run `kiwix-serve`
+yourself: the Debian and Ubuntu package `kiwix-tools` provides it.
+
+```bash
+sudo apt-get update && sudo apt-get install -y git curl ca-certificates kiwix-tools
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source "$HOME/.local/bin/env"
+git clone https://github.com/LaserLloyd/InfoForge.git
+cd InfoForge
+uv tool install --python 3.12 .
+mkdir -p ~/zims ~/.config/infoforge
+ZIM=$(curl -sL https://download.kiwix.org/zim/wikipedia/ | grep -o 'wikipedia_en_top_mini_[0-9-]*\.zim' | sort -u | tail -1)
+curl -L -o ~/zims/$ZIM https://download.kiwix.org/zim/wikipedia/$ZIM
+cat > ~/.config/infoforge/config.yaml <<EOF
+model_id: "your-model-id"
+base_url: "http://127.0.0.1:1234/v1"
+kiwix_url: "http://127.0.0.1:8090"
+zim_dir: "~/zims"
+zims:
+  - file: "$ZIM"
+    name: "Wikipedia (top articles)"
+    enabled: true
+    license: "CC BY-SA 4.0"
+EOF
+kiwix-serve --address 127.0.0.1 --port 8090 ~/zims/$ZIM &
+infoforge doctor
+infoforge ask "Why is the sky blue?"
+```
+
+`kiwix-serve` runs in the background of this shell; use a systemd user unit or `nohup` to keep it. Do not run
+`infoforge serve` here. To install the MCP server too, use `uv tool install --python 3.12 '.[mcp]'`.
+
+| Pros | Cons |
+| --- | --- |
+| Smallest footprint; works anywhere Python and a `kiwix-serve` run | You start and supervise `kiwix-serve` yourself |
+| Plain `infoforge` and `infoforge-mcp` commands | Ubuntu 24.04's `kiwix-tools` is 3.5.0, older than the pinned 3.8.2 image; one half-downloaded ZIM can stop it, since 3.5.0 lacks `--skipInvalid` |
+
+### macOS
+
+Not tested. The Windows methods apply with `brew install git uv` and `brew install --cask docker` in place
+of `winget`, bash instead of PowerShell (use the Linux Docker Compose block from `git clone`, without
+`sudo`, or the `uv tool install` block with `kiwix-serve` from Docker or `brew install kiwix-tools`), and
+the same "do not run `infoforge serve`" rule.
+
+### Upgrade and uninstall
+
+| Method | Upgrade | Uninstall (config, ZIMs and logs are kept) |
+| --- | --- | --- |
+| Installer script | `git pull`, then `deploy/install.sh` again; to change kiwix, `podman pull ghcr.io/kiwix/kiwix-serve:<tag>`, set `kiwix_image_tag`, `infoforge serve recreate` | `deploy/install.sh --uninstall` (removes the unit, container and CLI) |
+| Docker Compose | `git pull`, then `docker compose build infoforge` and `docker compose up -d kiwix`; roll back with `git checkout <tag>` | `docker compose down` keeps the log volume; `docker compose down -v` deletes it. Config and ZIMs are your files |
+| `uv tool install` | `git pull`, then `uv tool install --reinstall --python 3.12 .` | `uv tool uninstall infoforge`; stop `kiwix-serve` |
+
+A ZIM you add later needs `infoforge serve recreate` (installer) or a `kiwix-serve` restart (own server).
+There is no database to migrate, so an upgrade never touches your data.
+
+**No config file at all:** set `INFOFORGE_MODEL_ID`, `INFOFORGE_BASE_URL`, `INFOFORGE_KIWIX_URL`,
+`INFOFORGE_ZIM_DIR` and `INFOFORGE_ZIMS` (a JSON list of `{"file": "..."}` objects) and run `infoforge search --no-ensure ...`.
+Run `infoforge doctor` whenever something looks wrong; see [Troubleshooting](#troubleshooting).
 
 ## The CLI
 
