@@ -159,9 +159,14 @@ def build_server():
     """Create the server with the five read-only tools registered."""
     cls = _server_class()
     try:
-        server = cls(SERVER_NAME, instructions=INSTRUCTIONS)
-    except TypeError:  # pragma: no cover - older signature
-        server = cls(SERVER_NAME)
+        # 2.x MCPServer reports `version` in the initialize handshake; 1.x
+        # FastMCP has no such parameter.
+        server = cls(SERVER_NAME, instructions=INSTRUCTIONS, version=__version__)
+    except TypeError:
+        try:
+            server = cls(SERVER_NAME, instructions=INSTRUCTIONS)
+        except TypeError:  # pragma: no cover - older signature
+            server = cls(SERVER_NAME)
     annotations = _read_only_annotations()
 
     def register(fn):

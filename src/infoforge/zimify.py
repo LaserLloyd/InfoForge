@@ -13,12 +13,20 @@ from __future__ import annotations
 
 import html
 import shutil
+import struct
 import subprocess
+import zlib
 from pathlib import Path
 
 from .config import InfoForgeError
 
 MARKDOWN_SUFFIXES = (".md", ".markdown")
+
+#: zimwriterfs (zim-tools >= 3) refuses to build without a 48x48 PNG
+#: illustration; this is the file written into the prepared directory unless
+#: the input folder already provides one of that name.
+ILLUSTRATION_NAME = "illustration.png"
+ILLUSTRATION_SIZE = 48
 
 
 class ZimifyError(InfoForgeError):
@@ -69,6 +77,22 @@ def _write_index(prep_dir: Path, files: list[Path], title: str, description: str
     )
 
 
+def default_illustration() -> bytes:
+    """A plain 48x48 RGB PNG (stdlib only): the mandatory ZIM illustration."""
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        body = tag + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    size = ILLUSTRATION_SIZE
+    row = b"\x00" + bytes((70, 130, 180)) * size          # filter byte + steel-blue pixels
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(row * size, 9))
+        + chunk(b"IEND", b"")
+    )
+
+
 def zimify(input_dir: Path, output_zim: Path, title: str = "",
            description: str = "Local knowledge base",
            language: str = "eng", creator: str = "InfoForge",
@@ -105,11 +129,17 @@ def zimify(input_dir: Path, output_zim: Path, title: str = "",
             ) from None
 
     _write_index(prep_dir, files, title, description)
+    illustration = prep_dir / ILLUSTRATION_NAME
+    if not illustration.exists():
+        illustration.write_bytes(default_illustration())
 
-    # --creator and --publisher are mandatory in current zim-tools; without
-    # them zimwriterfs refuses the build with a usage error.
+    # --creator, --publisher, --illustration and --name are all mandatory in
+    # current zim-tools (3.x): without any one of them zimwriterfs refuses the
+    # build with "too few arguments".  --name is the version-independent
+    # identifier of the content; the output stem is the natural choice.
     command = [
-        "zimwriterfs", "--welcome=index.html", f"--language={language}",
+        "zimwriterfs", "--welcome=index.html", f"--illustration={ILLUSTRATION_NAME}",
+        f"--language={language}", f"--name={output_zim.stem}",
         f"--title={title}", f"--description={description}",
         f"--creator={creator}", f"--publisher={publisher}",
         ".", str(output_zim),

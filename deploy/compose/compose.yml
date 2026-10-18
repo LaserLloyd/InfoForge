@@ -32,10 +32,10 @@ services:
       # no-op elsewhere. The mount is read-only: kiwix-serve never writes ZIMs.
       - ${ZIM_DIR:-./zims}:/data:ro,z
     ports:
-      # Loopback only, and 8081 on the host so it does not collide with a
-      # StudioForge panel on 8080. Remove this block to keep kiwix private to
-      # the compose network.
-      - "127.0.0.1:${KIWIX_PORT:-8081}:8080"
+      # Loopback only, and 8090 on the host (the same default as a native
+      # install's kiwix_port) so it does not collide with a StudioForge panel on
+      # 8080. Remove this block to keep kiwix private to the compose network.
+      - "127.0.0.1:${KIWIX_PORT:-8090}:8080"
     networks: [infoforge]
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
@@ -53,12 +53,14 @@ services:
 
   infoforge:
     profiles: [cli]
-    image: ghcr.io/laserlloyd/infoforge:${INFOFORGE_TAG:-2.0.0}
+    # Built locally from the clone when the tag is not present (compose run/build).
+    # Keep the default in step with pyproject.toml's version.
+    image: ghcr.io/laserlloyd/infoforge:${INFOFORGE_TAG:-2.1.0}
     build:
       context: ../..
       dockerfile: Dockerfile
       args:
-        VERSION: ${INFOFORGE_TAG:-2.0.0}
+        VERSION: ${INFOFORGE_TAG:-2.1.0}
     init: true
     command: ["doctor"]
     depends_on:
