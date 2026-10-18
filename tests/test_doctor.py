@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 import requests
 from conftest import FakeResponse
@@ -193,19 +195,24 @@ def _cfg_with_key(path, key="sk-1"):
     return Config(model_id="m", base_url="http://h/v1", api_key=key, path=path)
 
 
-def test_loose_permissions_on_a_config_with_a_key_fail(tmp_path, monkeypatch):
+def _keyed_file(tmp_path, text="model_id: m\nbase_url: http://h/v1\napi_key: sk-1\n"):
     path = tmp_path / "c.yaml"
-    path.write_text("x", encoding="utf-8")
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_loose_permissions_on_a_config_with_a_key_fail(tmp_path, monkeypatch):
+    path = _keyed_file(tmp_path)
     monkeypatch.setattr(doctor, "_IS_POSIX", True)
     monkeypatch.setattr(doctor, "_file_mode", lambda p: 0o644)
+    monkeypatch.setattr(doctor, "_mount_ignores_modes", lambda p: False)
     report = doctor.Report()
     doctor._check_config_permissions(report, _cfg_with_key(path))
     assert not report.ok and "chmod 600" in report.checks[0].detail
 
 
 def test_tight_permissions_pass(tmp_path, monkeypatch):
-    path = tmp_path / "c.yaml"
-    path.write_text("x", encoding="utf-8")
+    path = _keyed_file(tmp_path)
     monkeypatch.setattr(doctor, "_IS_POSIX", True)
     monkeypatch.setattr(doctor, "_file_mode", lambda p: 0o600)
     report = doctor.Report()
@@ -232,7 +239,8 @@ def test_permission_check_tolerates_a_vanished_file(tmp_path, monkeypatch):
         raise FileNotFoundError
     monkeypatch.setattr(doctor, "_file_mode", gone)
     report = doctor.Report()
-    doctor._check_config_permissions(report, _cfg_with_key(tmp_path / "c.yaml"))
+    doctor._check_config_permissions(report, _cfg_with_key(_keyed_file(tmp_path)))
+    doctor._check_config_permissions(report, _cfg_with_key(tmp_path / "missing.yaml"))
     assert report.checks == []
 
 
@@ -240,3 +248,121 @@ def test_file_mode_reads_the_real_mode(tmp_path):
     path = tmp_path / "f"
     path.write_text("x", encoding="utf-8")
     assert 0 <= doctor._file_mode(path) <= 0o777
+
+
+# ---- the key is in the environment, or the mount cannot carry modes (Windows bind mount)
+
+def _posix_777(monkeypatch):
+    monkeypatch.setattr(doctor, "_IS_POSIX", True)
+    monkeypatch.setattr(doctor, "_file_mode", lambda p: 0o777)
+
+
+def test_env_supplied_key_with_a_keyless_file_passes_whatever_the_mode(tmp_path, monkeypatch):
+    # The Windows-bind-mount case: mode 777, but the file holds no secret.
+    path = _keyed_file(tmp_path, 'model_id: m\nbase_url: http://h/v1\napi_key: ""\n')
+    _posix_777(monkeypatch)
+    monkeypatch.setattr(doctor, "_mount_ignores_modes",
+                        lambda p: pytest.fail("a keyless file needs no mount probe"))
+    report = doctor.Report()
+    doctor._check_config_permissions(report, _cfg_with_key(path, key="from-env"))
+    row = report.checks[0]
+    assert report.ok and row.name == "config perms"
+    assert "no secret" in row.detail and "environment" in row.detail
+    assert "[PASS] config perms" in report.render()
+
+
+def test_file_without_the_api_key_field_at_all_also_passes(tmp_path, monkeypatch):
+    path = _keyed_file(tmp_path, "model_id: m\nbase_url: http://h/v1\n")
+    _posix_777(monkeypatch)
+    report = doctor.Report()
+    doctor._check_config_permissions(report, _cfg_with_key(path, key="from-env"))
+    assert report.ok and "no secret" in report.checks[0].detail
+
+
+def test_secret_on_a_mount_without_posix_modes_is_a_warning_not_a_failure(tmp_path, monkeypatch):
+    path = _keyed_file(tmp_path)
+    _posix_777(monkeypatch)
+    monkeypatch.setattr(doctor, "_mount_fstype", lambda p: "fuse.grpcfuse")
+    report = doctor.Report()
+    doctor._check_config_permissions(report, _cfg_with_key(path))
+    row = report.checks[0]
+    assert report.ok
+    assert row.detail.startswith("WARNING") and "move the key to the environment" in row.detail
+    assert "[WARN] config perms" in report.render()
+
+
+def test_secret_on_a_normal_filesystem_still_fails(tmp_path, monkeypatch):
+    path = _keyed_file(tmp_path)
+    _posix_777(monkeypatch)
+    monkeypatch.setattr(doctor, "_mount_fstype", lambda p: "ext4")
+    monkeypatch.setattr(doctor, "_chmod_is_ignored", lambda p: False)
+    report = doctor.Report()
+    doctor._check_config_permissions(report, _cfg_with_key(path))
+    assert not report.ok and "chmod 600" in report.checks[0].detail
+    assert "[FAIL] config perms" in report.render()
+
+
+def test_a_fallback_key_in_the_file_counts_as_a_secret(tmp_path, monkeypatch):
+    path = _keyed_file(tmp_path, "model_id: m\nbase_url: http://h/v1\nfallbacks:\n"
+                                 "  - {model_id: f, base_url: http://f/v1, api_key: sk-2}\n")
+    _posix_777(monkeypatch)
+    monkeypatch.setattr(doctor, "_mount_fstype", lambda p: "ext4")
+    monkeypatch.setattr(doctor, "_chmod_is_ignored", lambda p: False)
+    report = doctor.Report()
+    cfg = dataclasses.replace(_cfg_with_key(path, key=""),
+                              fallbacks=(Endpoint("f", "http://f/v1", "sk-2"),))
+    doctor._check_config_permissions(report, cfg)
+    assert not report.ok
+
+
+def test_unparsable_file_gives_no_perms_row(tmp_path, monkeypatch):
+    _posix_777(monkeypatch)
+    report = doctor.Report()
+    doctor._check_config_permissions(report, _cfg_with_key(_keyed_file(tmp_path, "a: [")))
+    assert report.checks == []
+
+
+def test_file_holds_secret_shapes(tmp_path):
+    assert doctor._file_holds_secret(_keyed_file(tmp_path, "- just\n- a list\n")) is False
+    assert doctor._file_holds_secret(_keyed_file(tmp_path, "fallbacks: nope\n")) is False
+    assert doctor._file_holds_secret(_keyed_file(tmp_path, "api_key: '  '\n")) is False
+    assert doctor._file_holds_secret(_keyed_file(tmp_path, "api_key: sk\n")) is True
+
+
+def test_mount_fstype_picks_the_longest_containing_mount(tmp_path):
+    mounts = tmp_path / "mounts"
+    lines = ["overlay / overlay rw 0 0",
+             "grpcfuse /config fuse.grpcfuse rw 0 0",
+             "grpcfuse /config/config.yaml fuse.grpcfuse ro 0 0",
+             "tmpfs /config2 tmpfs rw 0 0",
+             "9p /my" + chr(92) + "040data 9p rw 0 0",   # /proc/mounts escapes a space as \040
+             "garbage"]
+    mounts.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    f = str(mounts)
+    assert doctor._mount_fstype("/config/config.yaml", f) == "fuse.grpcfuse"
+    assert doctor._mount_fstype("/config/other.yaml", f) == "fuse.grpcfuse"
+    assert doctor._mount_fstype("/config2/x", f) == "tmpfs"   # /config is not a prefix of it
+    assert doctor._mount_fstype("/etc/x", f) == "overlay"
+    assert doctor._mount_fstype("/my data/x", f) == "9p"
+    assert doctor._mount_fstype("/x", str(tmp_path / "missing")) is None
+
+
+def test_chmod_probe_is_inconclusive_when_the_directory_is_not_writable(tmp_path):
+    assert doctor._chmod_is_ignored(tmp_path / "no-such-dir" / "c.yaml") is False
+
+
+def test_chmod_probe_detects_a_chmod_that_does_not_stick(tmp_path, monkeypatch):
+    monkeypatch.setattr(doctor.os, "chmod", lambda *a, **k: None)
+    monkeypatch.setattr(doctor.os, "stat",
+                        lambda p, *a, **k: type("S", (), {"st_mode": 0o100777})())
+    assert doctor._chmod_is_ignored(tmp_path / "c.yaml") is True
+
+
+def test_mount_ignores_modes_uses_either_signal(monkeypatch):
+    monkeypatch.setattr(doctor, "_mount_fstype", lambda p: "virtiofs")
+    assert doctor._mount_ignores_modes("/x") is True
+    monkeypatch.setattr(doctor, "_mount_fstype", lambda p: "ext4")
+    monkeypatch.setattr(doctor, "_chmod_is_ignored", lambda p: True)
+    assert doctor._mount_ignores_modes("/x") is True
+    monkeypatch.setattr(doctor, "_chmod_is_ignored", lambda p: False)
+    assert doctor._mount_ignores_modes("/x") is False

@@ -5,6 +5,17 @@ versions follow [Semantic Versioning](https://semver.org/). Exit codes and the
 `reason` strings of `ask --json` are a stable contract and have not changed
 since 2.0.0.
 
+## [Unreleased]
+
+### Fixed
+- `infoforge doctor` no longer fails `config perms` for a key that lives in the
+  environment: only an `api_key` written in the config *file* is checked. On a
+  filesystem that cannot carry POSIX modes (a Windows or macOS bind mount into a
+  container always shows 777) a key in the file is a `WARN` ("move the key to
+  the environment"), not a `FAIL`; a world-readable key on a normal filesystem
+  still fails. The human table now prints `WARN` for rows whose detail starts
+  with `WARNING` (`--json` output is unchanged).
+
 ## [2.1.0] - 2026-10-18
 
 Hardening, a library API, and two new ways to consume InfoForge (MCP server and

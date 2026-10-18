@@ -8,9 +8,13 @@ and a config that will not even parse still yields a report, not a traceback.
 from __future__ import annotations
 
 import os
+import posixpath
+import re
+import tempfile
 from dataclasses import dataclass, field
 
 import requests
+import yaml
 
 from . import kiwix
 from .config import Config, ConfigError
@@ -61,7 +65,10 @@ def render(report: dict) -> str:
     width = max((len(c["name"]) for c in checks), default=10)
     lines = []
     for check in checks:
-        mark = "PASS" if check["ok"] else "FAIL"
+        if not check["ok"]:
+            mark = "FAIL"
+        else:
+            mark = "WARN" if check["detail"].startswith("WARNING") else "PASS"
         lines.append(f"  [{mark}] {check['name'].ljust(width)}  {check['detail']}")
     lines.append("")
     lines.append("doctor: " + ("all checks passed" if report["ok"] else "problems found"))
@@ -107,20 +114,120 @@ def _file_mode(path) -> int:
     return path.stat().st_mode & 0o777
 
 
+# Filesystems (as /proc/mounts names them) that cannot carry POSIX modes: a
+# Windows or macOS bind mount into a Linux container presents every file as 777
+# and ignores chmod.
+_NO_POSIX_MODE_FS = frozenset({
+    "9p", "cifs", "smb3", "smbfs", "drvfs", "virtiofs", "vboxsf",
+    "fuse.grpcfuse", "fuse.osxfs", "fuse.virtiofs", "fuse.vmhgfs-fuse",
+})
+
+_MOUNT_ESCAPE = re.compile(r"\\([0-7]{3})")
+
+
+def _unescape_mount_field(text: str) -> str:
+    """/proc/mounts writes a space as an octal escape (and tab, newline, backslash)."""
+    return _MOUNT_ESCAPE.sub(lambda m: chr(int(m.group(1), 8)), text)
+
+
+def _mount_fstype(path, mounts_file: str = "/proc/mounts") -> str | None:
+    """The filesystem type of the longest mount point that contains ``path``."""
+    try:
+        with open(mounts_file, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return None
+    raw = str(path)
+    target = posixpath.normpath(raw if raw.startswith("/") else os.path.abspath(raw))
+    best, best_type = "", None
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        mount = _unescape_mount_field(parts[1])
+        inside = target == mount or mount == "/" or target.startswith(mount.rstrip("/") + "/")
+        if inside and len(mount) >= len(best):
+            best, best_type = mount, parts[2]
+    return best_type
+
+
+def _chmod_is_ignored(path) -> bool:
+    """True when chmod 600 on a scratch file beside ``path`` does not stick.
+
+    False when it does, and also False when the probe cannot run (a read-only
+    mount, no permission): an inconclusive probe must not excuse a finding.
+    """
+    try:
+        with tempfile.NamedTemporaryFile(dir=os.path.dirname(os.path.abspath(str(path)))) as tmp:
+            os.chmod(tmp.name, 0o600)
+            return bool(os.stat(tmp.name).st_mode & 0o077)
+    except OSError:
+        return False
+
+
+def _mount_ignores_modes(path) -> bool:
+    """Can the filesystem holding ``path`` not carry POSIX permission modes?"""
+    return _mount_fstype(path) in _NO_POSIX_MODE_FS or _chmod_is_ignored(path)
+
+
+def _file_holds_secret(path) -> bool | None:
+    """Does the config *file itself* carry an api_key (top level or a fallback)?
+
+    A key that arrives through ``INFOFORGE_API_KEY`` is in the environment, not
+    in the file, and is none of this check's business.  None: unreadable.
+    """
+    try:
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return None
+    if not isinstance(loaded, dict):
+        return False
+    if str(loaded.get("api_key") or "").strip():
+        return True
+    fallbacks = loaded.get("fallbacks")
+    if isinstance(fallbacks, list):
+        return any(isinstance(e, dict) and str(e.get("api_key") or "").strip()
+                   for e in fallbacks)
+    return False
+
+
+def _any_key(cfg: Config) -> bool:
+    return bool(cfg.api_key) or any(f.api_key for f in cfg.fallbacks)
+
+
 def _check_config_permissions(report: Report, cfg: Config) -> None:
-    """An api_key in a group/world-readable file is a finding (POSIX only)."""
-    if cfg.path is None or not cfg.api_key or not _IS_POSIX:
+    """A secret in a group/world-readable config file is a finding (POSIX only).
+
+    Only a key written *in the file* counts.  On a mount that cannot carry
+    POSIX modes (a Windows bind mount shows 777) the finding is downgraded to a
+    warning, because chmod cannot fix it: move the key to the environment.
+    """
+    if cfg.path is None or not _any_key(cfg) or not _IS_POSIX:
+        return
+    in_file = _file_holds_secret(cfg.path)
+    if in_file is None:
+        return
+    if not in_file:
+        report.add("config perms", True,
+                   f"{cfg.path} holds no secret (the api_key comes from the "
+                   "environment), so its mode does not matter")
         return
     try:
         mode = _file_mode(cfg.path)
     except OSError:
         return
-    if mode & 0o077:
+    if not mode & 0o077:
+        report.add("config perms", True, f"{cfg.path} is mode {mode:03o}")
+    elif _mount_ignores_modes(cfg.path):
+        report.add("config perms", True,
+                   f"WARNING: {cfg.path} holds an api_key and shows mode {mode:03o}, but its "
+                   "mount (a Windows/macOS bind mount?) cannot carry POSIX modes, so chmod "
+                   "cannot fix it: move the key to the environment (INFOFORGE_API_KEY) and "
+                   "blank api_key in the file")
+    else:
         report.add("config perms", False,
                    f"{cfg.path} holds an api_key but is mode {mode:03o}: run "
                    f"chmod 600 {cfg.path}")
-    else:
-        report.add("config perms", True, f"{cfg.path} is mode {mode:03o}")
 
 
 def run(explicit_config: str | None = None,
