@@ -27,14 +27,14 @@ from infoforge.retrieve import Source
 
 CONFIG_TEXT = """
 model_id: test-model
-base_url: http://127.0.0.1:1234/v1
+base_url: http://127.0.0.1:11234/v1
 zim_dir: {zim_dir}
 zims:
   - file: test.zim
     enabled: true
 """
 
-SOURCES = [Source(title="Emu War", url="http://127.0.0.1:8080/content/w/Emu_War",
+SOURCES = [Source(title="Emu War", url="http://127.0.0.1:18080/content/w/Emu_War",
                   text="1932 operation.", score=12.0)]
 
 
@@ -105,7 +105,7 @@ def test_ask_ok_exits_0_and_prints_answer_and_citations(config_file, monkeypatch
     assert cli.main(["ask", "What", "was", "the", "Emu", "War?"]) == EXIT_OK
     out = capsys.readouterr().out
     assert "According to Emu War, 1932." in out
-    assert "[1] Emu War — http://127.0.0.1:8080/content/w/Emu_War" in out
+    assert "[1] Emu War — http://127.0.0.1:18080/content/w/Emu_War" in out
 
 
 def test_ask_without_sources_exits_3(config_file, monkeypatch, capsys):
@@ -220,7 +220,7 @@ def test_doctor_json(monkeypatch, tmp_path, capsys):
 def test_serve_status_reports_container_state(config_file, monkeypatch, capsys):
     monkeypatch.setattr(kiwix, "status", lambda cfg: {
         "name": "infoforge-kiwix", "state": "running", "kiwix_url": "http://x",
-        "configured": ["test.zim"], "serving": ["test.zim"], "ps": "img | Up | 8080",
+        "configured": ["test.zim"], "serving": ["test.zim"], "ps": "img | Up | 18080",
     })
     assert cli.main(["serve", "status"]) == EXIT_OK
     assert "running" in capsys.readouterr().out

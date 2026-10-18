@@ -9,7 +9,7 @@ from infoforge.config import EXIT_CONFIG, ConfigError
 
 MINIMAL = """
 model_id: some-model
-base_url: http://127.0.0.1:1234/v1
+base_url: http://127.0.0.1:11234/v1
 """
 
 
@@ -73,7 +73,7 @@ def test_missing_file_names_the_path_and_the_fix(tmp_path):
 
 def test_missing_model_id_refuses_to_guess(tmp_path):
     with pytest.raises(ConfigError, match="model_id"):
-        config_mod.load(write(tmp_path, "base_url: http://127.0.0.1:1234/v1\n"))
+        config_mod.load(write(tmp_path, "base_url: http://127.0.0.1:11234/v1\n"))
 
 
 def test_missing_base_url_is_fatal(tmp_path):
@@ -83,7 +83,7 @@ def test_missing_base_url_is_fatal(tmp_path):
 
 def test_base_url_scheme_is_validated(tmp_path):
     with pytest.raises(ConfigError, match="http"):
-        config_mod.load(write(tmp_path, "model_id: m\nbase_url: 127.0.0.1:1234\n"))
+        config_mod.load(write(tmp_path, "model_id: m\nbase_url: 127.0.0.1:11234\n"))
 
 
 def test_non_integer_max_articles(tmp_path):
@@ -147,9 +147,9 @@ def test_fallback_inherits_api_key_unless_explicit(tmp_path):
         'api_key: "primary-key"\n'
         "fallbacks:\n"
         "  - model_id: m2\n"
-        "    base_url: http://127.0.0.1:1235/v1\n"
+        "    base_url: http://127.0.0.1:11235/v1\n"
         "  - model_id: m3\n"
-        "    base_url: http://127.0.0.1:1236/v1\n"
+        "    base_url: http://127.0.0.1:11236/v1\n"
         '    api_key: ""\n'
     )
     cfg = config_mod.load(write(tmp_path, text))
@@ -159,7 +159,7 @@ def test_fallback_inherits_api_key_unless_explicit(tmp_path):
 
 def test_endpoints_puts_primary_first(tmp_path):
     text = MINIMAL + (
-        "fallbacks:\n  - model_id: m2\n    base_url: http://127.0.0.1:1235/v1\n"
+        "fallbacks:\n  - model_id: m2\n    base_url: http://127.0.0.1:11235/v1\n"
     )
     cfg = config_mod.load(write(tmp_path, text))
     assert [e.model_id for e in cfg.endpoints] == ["some-model", "m2"]

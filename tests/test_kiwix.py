@@ -113,7 +113,7 @@ def test_split_content_path_rejects_an_empty_url():
 
 def test_content_url_is_absolute(cfg):
     assert kiwix.content_url(cfg, "/content/wiki/Emu_War") == \
-        "http://127.0.0.1:8080/content/wiki/Emu_War"
+        "http://127.0.0.1:18080/content/wiki/Emu_War"
 
 
 def test_fetch_article_falls_back_from_raw_to_content(cfg):
@@ -156,7 +156,7 @@ def test_run_args_are_fixed_argv_with_explicit_zim_paths(cfg):
 
 def test_run_args_publish_uses_the_configured_bind(cfg):
     args = kiwix._run_args(cfg, ["a.zim"])
-    assert args[args.index("-p") + 1] == "127.0.0.1:8080:8080"
+    assert args[args.index("-p") + 1] == "127.0.0.1:18080:8080"
 
 
 # ------------------------------------------------------- container lifecycle
