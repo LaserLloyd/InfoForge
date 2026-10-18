@@ -1,0 +1,26 @@
+# InfoForge config for the compose stack. Copy to infoforge.config.yaml.
+# (A deploy/compose/.gitignore keeps your copy out of version control.)
+
+# --- the LLM -----------------------------------------------------------------
+model_id: "your-model-id-here"
+# An OpenAI-compatible server on the container host. Use
+# http://studioforge:1234/v1 instead when StudioForge runs in the same compose
+# network (see the DisPatch stack file).
+base_url: "http://host.docker.internal:1234/v1"
+api_key: ""
+studioforge: false
+
+# --- kiwix: a compose service, not a podman container -------------------------
+kiwix_url: "http://kiwix:8080"
+# Mounted read-only from ZIM_DIR (default ./zims) at /zims by compose.yml.
+zim_dir: "/zims"
+zims:
+  - file: "wikipedia_en_simple_all_nopic.zim"
+    name: "Simple English Wikipedia"
+    enabled: true
+
+max_articles: 5
+max_chars: 8000
+search_pool: 15
+timeout_s: 180
+hold_wait_s: 300

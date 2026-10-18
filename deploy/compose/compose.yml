@@ -1,0 +1,88 @@
+# InfoForge + kiwix-serve on one private network.
+#
+#   cp infoforge.config.example.yaml infoforge.config.yaml   # set model_id / base_url
+#   mkdir -p zims && cp /path/to/wikipedia_en_simple_all_nopic.zim zims/
+#   # also list the file under `zims:` in infoforge.config.yaml
+#   docker compose up -d kiwix                       # or: podman compose / podman-compose
+#   docker compose run --rm infoforge doctor
+#   docker compose run --rm infoforge ask "Why is the sky blue?"
+#
+# InfoForge is a CLI, not a daemon, so it sits behind the `cli` profile and is
+# run on demand with `compose run`. Only kiwix-serve stays up. Inside this stack
+# the `infoforge serve ...` podman lifecycle is NOT used: kiwix_url points at
+# the `kiwix` service (see infoforge.config.example.yaml).
+name: infoforge
+
+services:
+  kiwix:
+    image: ghcr.io/kiwix/kiwix-serve:${KIWIX_TAG:-3.8.2}
+    # The image entrypoint runs `kiwix-serve --port=8080 <args>` through sh, so
+    # the glob expands inside the container. -k (--skipInvalid) keeps one
+    # half-downloaded ZIM from taking the whole server down.
+    command: ["--skipInvalid", "/data/${ZIM_GLOB:-*.zim}"]
+    # Image default is uid 1001. Rootless podman maps container root to YOU, the
+    # only identity that can read a mode-700 home directory: run
+    #   KIWIX_USER=0 podman-compose up -d kiwix
+    # (that is less privilege than it looks like; see the InfoForge README).
+    user: "${KIWIX_USER:-1001}"
+    restart: unless-stopped
+    init: true
+    volumes:
+      # `z` relabels the bind mount for SELinux hosts (Fedora, Bazzite); it is a
+      # no-op elsewhere. The mount is read-only: kiwix-serve never writes ZIMs.
+      - ${ZIM_DIR:-./zims}:/data:ro,z
+    ports:
+      # Loopback only, and 8081 on the host so it does not collide with a
+      # StudioForge panel on 8080. Remove this block to keep kiwix private to
+      # the compose network.
+      - "127.0.0.1:${KIWIX_PORT:-8081}:8080"
+    networks: [infoforge]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  infoforge:
+    profiles: [cli]
+    image: ghcr.io/laserlloyd/infoforge:${INFOFORGE_TAG:-2.0.0}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${INFOFORGE_TAG:-2.0.0}
+    init: true
+    command: ["doctor"]
+    depends_on:
+      kiwix:
+        condition: service_healthy
+    volumes:
+      - ./infoforge.config.yaml:/config/config.yaml:ro,z
+      - ${ZIM_DIR:-./zims}:/zims:ro,z
+      - infoforge-state:/state
+    # Reach an LLM server on the container host (StudioForge, LM Studio, ...):
+    # `host.docker.internal` resolves on Docker Desktop and, with this line, on
+    # Linux Docker; rootless podman also provides host.containers.internal.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [infoforge]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/tmp"]
+
+networks:
+  infoforge:
+    name: infoforge
+
+volumes:
+  infoforge-state:
+    name: infoforge-state
