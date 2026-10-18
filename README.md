@@ -313,7 +313,7 @@ the same "do not run `infoforge serve`" rule.
 | Method | Upgrade | Uninstall (config, ZIMs and logs are kept) |
 | --- | --- | --- |
 | Installer script | `git pull`, then `deploy/install.sh` again; to change kiwix, `podman pull ghcr.io/kiwix/kiwix-serve:<tag>`, set `kiwix_image_tag`, `infoforge serve recreate` | `deploy/install.sh --uninstall` (removes the unit, container and CLI) |
-| Docker Compose | `git pull`, then `docker compose build infoforge` and `docker compose up -d kiwix`; roll back with `git checkout <tag>` | `docker compose down` keeps the log volume; `docker compose down -v` deletes it. Config and ZIMs are your files |
+| Docker Compose | `git pull`, then `docker compose build infoforge` and `docker compose up -d kiwix`; roll back with `git checkout <tag>` | `docker compose down` keeps the log volume; `docker compose --profile cli down -v` deletes it. Config and ZIMs are your files |
 | `uv tool install` | `git pull`, then `uv tool install --reinstall --python 3.12 .` | `uv tool uninstall infoforge`; stop `kiwix-serve` |
 
 A ZIM you add later needs `infoforge serve recreate` (installer) or a `kiwix-serve` restart (own server).

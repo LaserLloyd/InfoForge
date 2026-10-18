@@ -1,8 +1,10 @@
 # InfoForge + kiwix-serve on one private network.
 #
 #   cp infoforge.config.example.yaml infoforge.config.yaml   # set model_id / base_url
-#   mkdir -p zims && cp /path/to/wikipedia_en_simple_all_nopic.zim zims/
-#   # also list the file under `zims:` in infoforge.config.yaml
+#   mkdir -p zims
+#   ZIM=$(curl -sL https://download.kiwix.org/zim/wikipedia/ | grep -o 'wikipedia_en-simple_all_nopic_[0-9-]*\.zim' | sort -u | tail -1)
+#   curl -L -o zims/$ZIM https://download.kiwix.org/zim/wikipedia/$ZIM
+#   # then list "$ZIM" under `zims:` in infoforge.config.yaml (Kiwix dates the name; the lookup finds it)
 #   docker compose up -d kiwix                       # or: podman compose / podman-compose
 #   docker compose run --rm infoforge doctor
 #   docker compose run --rm infoforge ask "Why is the sky blue?"
