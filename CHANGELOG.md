@@ -8,6 +8,10 @@ since 2.0.0.
 ## [Unreleased]
 
 ### Fixed
+- Article text with non-ASCII letters came back as mojibake ("GalÃ¡pagos",
+  "AsociaciÃ³n") in `search --text`, `ask` and the MCP/DisPatch tools:
+  kiwix-serve sends article HTML as `text/html` without a charset and
+  `requests` decoded it as ISO-8859-1. A missing charset now means UTF-8.
 - `infoforge doctor` no longer fails `config perms` for a key that lives in the
   environment: only an `api_key` written in the config *file* is checked. On a
   filesystem that cannot carry POSIX modes (a Windows or macOS bind mount into a

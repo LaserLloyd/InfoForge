@@ -480,6 +480,17 @@ def content_url(cfg: Config, result_url: str) -> str:
     return f"{cfg.kiwix_url}/content/{quote_book(book)}/{'/'.join(article)}"
 
 
+def _decoded(resp: requests.Response) -> str:
+    """The body as text. kiwix-serve sends article HTML as a bare
+    ``text/html`` with no charset, and ``requests`` then falls back to
+    ISO-8859-1 (RFC 2616), turning every non-ASCII letter into mojibake
+    ("GalÃ¡pagos").  ZIM content is UTF-8, so a missing charset means UTF-8;
+    a charset the server does declare is honoured."""
+    if "charset" not in resp.headers.get("Content-Type", "").lower():
+        resp.encoding = "utf-8"
+    return resp.text
+
+
 def fetch_article(cfg: Config, result_url: str,
                   session: requests.Session | None = None) -> str | None:
     """Fetch an article's raw markup.
@@ -509,7 +520,7 @@ def fetch_article(cfg: Config, result_url: str,
         if resp.status_code != 200:
             warn(f"fetch failed for {url}: HTTP {resp.status_code}")
             continue
-        return resp.text
+        return _decoded(resp)
     warn(f"could not fetch article content for: {result_url}")
     return None
 

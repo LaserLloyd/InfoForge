@@ -409,3 +409,28 @@ def test_podman_never_inherits_stdin(monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run)
     kiwix._podman("ps")
     assert seen["stdin"] is subprocess.DEVNULL
+
+
+def _raw_response(body: bytes, content_type: str) -> requests.Response:
+    resp = requests.Response()
+    resp.status_code = 200
+    resp._content = body
+    resp.headers["Content-Type"] = content_type
+    # what requests' HTTPAdapter does with a live response
+    resp.encoding = requests.utils.get_encoding_from_headers(resp.headers)
+    return resp
+
+
+def test_fetch_article_reads_charsetless_html_as_utf8(cfg):
+    # kiwix-serve's /raw/ answers a bare "text/html"; requests would decode
+    # that as ISO-8859-1 and Wikka/ask would quote "GalÃ¡pagos".
+    body = "<p>Galápagos penguin, Asociación, 東京</p>".encode()
+    session = FakeSession([_raw_response(body, "text/html")])
+    assert kiwix.fetch_article(cfg, "/content/wiki/A", session=session) == \
+        "<p>Galápagos penguin, Asociación, 東京</p>"
+
+
+def test_fetch_article_honours_a_declared_charset(cfg):
+    body = "<p>café</p>".encode("latin-1")
+    session = FakeSession([_raw_response(body, "text/html; charset=ISO-8859-1")])
+    assert kiwix.fetch_article(cfg, "/content/wiki/A", session=session) == "<p>café</p>"
