@@ -12,6 +12,7 @@ import posixpath
 import re
 import tempfile
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import requests
 import yaml
@@ -130,44 +131,58 @@ def _unescape_mount_field(text: str) -> str:
     return _MOUNT_ESCAPE.sub(lambda m: chr(int(m.group(1), 8)), text)
 
 
-def _mount_fstype(path, mounts_file: str = "/proc/mounts") -> str | None:
-    """The filesystem type of the longest mount point that contains ``path``."""
+def _mount_for(path, mounts_file: str = "/proc/mounts") -> tuple[str, str] | None:
+    """(mount point, filesystem type) of the longest mount containing ``path``."""
     try:
-        with open(mounts_file, encoding="utf-8") as fh:
+        # surrogateescape: one odd mount point must not make doctor raise.
+        with open(mounts_file, encoding="utf-8", errors="surrogateescape") as fh:
             lines = fh.read().splitlines()
     except OSError:
         return None
     raw = str(path)
     target = posixpath.normpath(raw if raw.startswith("/") else os.path.abspath(raw))
-    best, best_type = "", None
+    best: tuple[str, str] | None = None
     for line in lines:
         parts = line.split()
         if len(parts) < 3:
             continue
         mount = _unescape_mount_field(parts[1])
         inside = target == mount or mount == "/" or target.startswith(mount.rstrip("/") + "/")
-        if inside and len(mount) >= len(best):
-            best, best_type = mount, parts[2]
-    return best_type
+        if inside and (best is None or len(mount) >= len(best[0])):
+            best = (mount, parts[2])
+    return best
 
 
-def _chmod_is_ignored(path) -> bool:
-    """True when chmod 600 on a scratch file beside ``path`` does not stick.
+def _chmod_probe(path) -> bool | None:
+    """Does chmod 600 on a scratch file beside ``path`` stick?  None: cannot tell.
 
-    False when it does, and also False when the probe cannot run (a read-only
-    mount, no permission): an inconclusive probe must not excuse a finding.
+    The probe cannot run on a read-only mount or without write permission; an
+    inconclusive probe must never excuse a finding.
     """
     try:
         with tempfile.NamedTemporaryFile(dir=os.path.dirname(os.path.abspath(str(path)))) as tmp:
             os.chmod(tmp.name, 0o600)
-            return bool(os.stat(tmp.name).st_mode & 0o077)
+            return not os.stat(tmp.name).st_mode & 0o077
     except OSError:
-        return False
+        return None
 
 
 def _mount_ignores_modes(path) -> bool:
-    """Can the filesystem holding ``path`` not carry POSIX permission modes?"""
-    return _mount_fstype(path) in _NO_POSIX_MODE_FS or _chmod_is_ignored(path)
+    """Does the filesystem holding ``path`` fail to carry POSIX permission modes?
+
+    A file that is its own mount (a single-file bind mount) is judged by that
+    mount's type alone; its directory belongs to a different filesystem.  Else
+    a conclusive chmod probe beside the file wins, and the type list decides
+    only when the probe cannot run (the usual read-only config mount).
+    """
+    mount = _mount_for(path)
+    fstype = mount[1] if mount else None
+    if mount and posixpath.normpath(str(path)) == mount[0]:
+        return fstype in _NO_POSIX_MODE_FS
+    worked = _chmod_probe(path)
+    if worked is not None:
+        return not worked
+    return fstype in _NO_POSIX_MODE_FS
 
 
 def _file_holds_secret(path) -> bool | None:
@@ -202,23 +217,26 @@ def _check_config_permissions(report: Report, cfg: Config) -> None:
     POSIX modes (a Windows bind mount shows 777) the finding is downgraded to a
     warning, because chmod cannot fix it: move the key to the environment.
     """
-    if cfg.path is None or not _any_key(cfg) or not _IS_POSIX:
+    if cfg.path is None or not _IS_POSIX:
         return
-    in_file = _file_holds_secret(cfg.path)
+    # The mode and the mount belong to the real file, not to a symlink to it.
+    real = Path(os.path.realpath(cfg.path))
+    in_file = _file_holds_secret(real)
     if in_file is None:
         return
     if not in_file:
-        report.add("config perms", True,
-                   f"{cfg.path} holds no secret (the api_key comes from the "
-                   "environment), so its mode does not matter")
+        if _any_key(cfg):
+            report.add("config perms", True,
+                       f"{cfg.path} holds no secret (the api_key comes from the "
+                       "environment), so its mode does not matter")
         return
     try:
-        mode = _file_mode(cfg.path)
+        mode = _file_mode(real)
     except OSError:
         return
     if not mode & 0o077:
         report.add("config perms", True, f"{cfg.path} is mode {mode:03o}")
-    elif _mount_ignores_modes(cfg.path):
+    elif _mount_ignores_modes(real):
         report.add("config perms", True,
                    f"WARNING: {cfg.path} holds an api_key and shows mode {mode:03o}, but its "
                    "mount (a Windows/macOS bind mount?) cannot carry POSIX modes, so chmod "
