@@ -25,7 +25,8 @@ accounts and no telemetry. What it does expose:
   so rootless podman can read your ZIMs), mapped to your own user on the host.
 - **Your LLM endpoint.** Questions and retrieved article text are sent to
   `base_url`. `api_key` is held in the config file in plaintext; keep that file
-  mode 600 (`doctor` checks) or use `INFOFORGE_API_KEY`. It is never written to
+  mode 600 (`doctor` checks) or use `INFOFORGE_API_KEY` (on a Windows bind mount, which
+  cannot carry modes, use the environment variable). It is never written to
   the event log and `config show` redacts it.
 - **Untrusted text.** Article text goes into the prompt verbatim, so an article
   can attempt prompt injection. InfoForge's tools have no side effects beyond
