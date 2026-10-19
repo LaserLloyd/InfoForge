@@ -56,7 +56,10 @@ released remove removed removes removing say says said tell tells told went
 won win wins wrote write writes written
 """.split())
 
-_TOKEN_RE = re.compile(r"[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)*")
+# Letters and digits of any script ("Galápagos", "Zürich", "東京"), not
+# underscores; an ASCII-only class split "Galápagos" into "Gal" + "pagos".
+_TOKEN_RE = re.compile(r"[^\W_]+(?:['-][^\W_]+)*")
+_TITLE_WORD_RE = re.compile(r"(?:[^\W_]|')+")
 
 # Number-to-words, read year-style, because Wikipedia titles novels and events
 # in words: "1984" has to become "Nineteen Eighty Four" for /suggest to find
@@ -148,7 +151,7 @@ def title_phrases(question: str, keywords: str) -> list[str]:
         phrases.append(" ".join(run))
 
     for tok in tokens:
-        if tok.isdigit():
+        if tok.isascii() and tok.isdigit():
             words = number_to_words(int(tok))
             if " " in words:
                 phrases.append(" ".join(w.capitalize() for w in words.split()))
@@ -213,7 +216,7 @@ def score_hit(hit: Hit, keywords: str, phrases: list[str]) -> float:
     terms = _terms(keywords)
     title_low = hit.title.lower()
     snippet_low = hit.snippet.lower()
-    title_words = set(re.findall(r"[a-z0-9']+", title_low))
+    title_words = set(_TITLE_WORD_RE.findall(title_low))
 
     score = 0.0
     for term in terms:

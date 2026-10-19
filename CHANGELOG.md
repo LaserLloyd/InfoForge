@@ -8,6 +8,10 @@ since 2.0.0.
 ## [Unreleased]
 
 ### Fixed
+- Questions with non-ASCII words were searched in pieces: the keyword
+  tokenizer only knew `[A-Za-z0-9]`, so "Galápagos" became "Gal pagos" and
+  "Zürich" became "Z rich" (CJK words vanished). Tokens and title words now
+  take letters and digits of any script.
 - Article text with non-ASCII letters came back as mojibake ("GalÃ¡pagos",
   "AsociaciÃ³n") in `search --text`, `ask` and the MCP/DisPatch tools:
   kiwix-serve sends article HTML as `text/html` without a charset and

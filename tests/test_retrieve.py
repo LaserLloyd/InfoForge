@@ -221,3 +221,31 @@ def test_retrieve_walks_past_unfetchable_hits(cfg):
     )
     sources = retrieve.retrieve(cfg, "Emu War", max_articles=1, session=session)
     assert [s.title for s in sources] == ["Emu War"]
+
+
+# ------------------------------------------------------- non-ASCII words
+
+def test_keyword_query_keeps_accented_and_cjk_words_whole():
+    # An ASCII-only tokenizer searched "Gal pagos" and "Z rich".
+    assert keyword_query("Where do Galápagos penguins live?") == "Galápagos penguins live"
+    assert keyword_query("How big is Zürich?") == "big Zürich"
+    assert keyword_query("東京タワー height") == "東京タワー height"
+
+
+def test_title_phrases_keep_accented_capitalized_runs():
+    q = "Tell me about São Paulo"
+    phrases = title_phrases(q, keyword_query(q))
+    assert phrases[0] == "São Paulo"
+
+
+def test_superscript_digits_do_not_crash_title_phrases():
+    title_phrases("area in km² of Tokyo", "area km² Tokyo")
+
+
+def test_accented_title_word_scores_as_a_full_title_term():
+    from infoforge.retrieve import score_hit
+    whole = score_hit(Hit(title="Galápagos penguin", url="/content/w/A", snippet=""),
+                      "Galápagos", [])
+    partial = score_hit(Hit(title="Galápagosian", url="/content/w/B", snippet=""),
+                        "Galápagos", [])
+    assert whole > partial
