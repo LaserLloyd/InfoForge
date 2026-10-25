@@ -7,6 +7,13 @@ since 2.0.0.
 
 ## [Unreleased]
 
+### Changed
+
+- **Licence: MIT No Attribution (MIT-0).** You can use, copy, change and ship InfoForge with no
+  conditions; no copyright notice has to be kept. You don't need to credit this project — but if you
+  do, a link back is appreciated. `LICENSE`, `pyproject.toml` (`MIT-0`), the Docker image label and the
+  README say so. Releases up to 2.1.0 were MIT. Retrieved ZIM content keeps its own licence.
+
 ### Fixed
 - Questions with non-ASCII words were searched in pieces: the keyword
   tokenizer only knew `[A-Za-z0-9]`, so "Galápagos" became "Gal pagos" and
