@@ -90,7 +90,7 @@ winget install --id Docker.DockerDesktop -e
 Start Docker Desktop once and accept its first-run prompts, then open a new PowerShell window:
 
 ```powershell
-git clone https://github.com/LaserLloyd/InfoForge.git
+git clone https://github.com/LaserLloyd/InfoForge.git   # scrub-ok: public repo URL
 cd InfoForge\deploy\compose
 New-Item -ItemType Directory -Force zims | Out-Null
 $ProgressPreference = 'SilentlyContinue'
@@ -136,7 +136,7 @@ winget install --id Docker.DockerDesktop -e
 Start Docker Desktop once, open a new PowerShell window, then:
 
 ```powershell
-git clone https://github.com/LaserLloyd/InfoForge.git
+git clone https://github.com/LaserLloyd/InfoForge.git   # scrub-ok: public repo URL
 cd InfoForge
 uv tool install --python 3.12 .
 uv tool update-shell
@@ -191,7 +191,7 @@ config, starts the kiwix container, installs a user service that brings it back 
 sudo apt-get update && sudo apt-get install -y git curl ca-certificates python3 podman
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source "$HOME/.local/bin/env"
-git clone https://github.com/LaserLloyd/InfoForge.git
+git clone https://github.com/LaserLloyd/InfoForge.git   # scrub-ok: public repo URL
 cd InfoForge
 mkdir -p ~/zims ~/.config/infoforge
 ZIM=$(curl -sL https://download.kiwix.org/zim/wikipedia/ | grep -o 'wikipedia_en_top_mini_[0-9-]*\.zim' | sort -u | tail -1)
@@ -232,7 +232,7 @@ Docker method.
 ```bash
 sudo apt-get update && sudo apt-get install -y git curl ca-certificates
 curl -fsSL https://get.docker.com | sh
-git clone https://github.com/LaserLloyd/InfoForge.git
+git clone https://github.com/LaserLloyd/InfoForge.git   # scrub-ok: public repo URL
 cd InfoForge/deploy/compose
 mkdir -p zims
 ZIM=$(curl -sL https://download.kiwix.org/zim/wikipedia/ | grep -o 'wikipedia_en_top_mini_[0-9-]*\.zim' | sort -u | tail -1)
@@ -271,7 +271,7 @@ yourself: the Debian and Ubuntu package `kiwix-tools` provides it.
 sudo apt-get update && sudo apt-get install -y git curl ca-certificates kiwix-tools
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source "$HOME/.local/bin/env"
-git clone https://github.com/LaserLloyd/InfoForge.git
+git clone https://github.com/LaserLloyd/InfoForge.git   # scrub-ok: public repo URL
 cd InfoForge
 uv tool install --python 3.12 .
 mkdir -p ~/zims ~/.config/infoforge
@@ -480,7 +480,7 @@ keep the text and article titles. `api_key` is never logged, and
 
 Wikipedia, Wiktionary and the other Wikimedia ZIMs are
 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/); Stack Exchange
-archives carry their own CC BY-SA terms. InfoForge's code is MIT, but **what it
+archives carry their own CC BY-SA terms. InfoForge's code is MIT-0, but **what it
 prints from a ZIM is not**: if you republish it, you owe attribution and a link
 to the licence. `ask` output therefore ends with an attribution line and every
 `--json` source row has a `license` field. The per-ZIM licence string comes from
@@ -715,5 +715,6 @@ their licences: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). History:
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE). The content you retrieve has its own licence; see
+MIT No Attribution ([MIT-0](LICENSE)). You don't need to credit this project — but if you do, a link back is appreciated.
+Releases up to 2.1.0 were MIT. The content you retrieve has its own licence; see
 [Content licensing](#content-licensing).

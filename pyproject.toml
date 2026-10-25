@@ -4,7 +4,7 @@ version = "2.1.0"
 description = "Ask questions grounded in local Kiwix ZIM archives with a local LLM."
 readme = "README.md"
 requires-python = ">=3.12"
-license = "MIT"
+license = "MIT-0"
 license-files = ["LICENSE"]
 keywords = ["kiwix", "zim", "wikipedia", "rag", "mcp", "offline"]
 dependencies = [
@@ -13,9 +13,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/LaserLloyd/InfoForge"
-Changelog = "https://github.com/LaserLloyd/InfoForge/blob/main/CHANGELOG.md"
-Security = "https://github.com/LaserLloyd/InfoForge/blob/main/SECURITY.md"
+Homepage = "https://github.com/LaserLloyd/InfoForge"   # scrub-ok: public repo URL
+Changelog = "https://github.com/LaserLloyd/InfoForge/blob/main/CHANGELOG.md"   # scrub-ok: public repo URL
+Security = "https://github.com/LaserLloyd/InfoForge/blob/main/SECURITY.md"   # scrub-ok: public repo URL
 
 [project.optional-dependencies]
 # MCP server (stdio): `infoforge-mcp`.  Optional so the CLI stays two-dependency.
