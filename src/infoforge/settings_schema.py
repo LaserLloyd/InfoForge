@@ -143,9 +143,14 @@ def as_int(value: Any, key: str, where: str) -> int:
 def as_bool(value: Any, key: str, where: str) -> bool:
     if isinstance(value, bool):
         return value
-    if isinstance(value, str) and value.strip().lower() in ("true", "false", "yes", "no"):
-        return value.strip().lower() in ("true", "yes")
-    raise _fail(where, key, f"must be true or false, got {value!r}")
+    if isinstance(value, str):
+        word = value.strip().lower()
+        if word in ("true", "yes", "on", "1"):
+            return True
+        if word in ("false", "no", "off", "0"):
+            return False
+    raise _fail(where, key,
+                f"must be true or false (also yes/no, on/off, 1/0), got {value!r}")
 
 
 def coerce(setting: Setting, raw: Any, where: str) -> Any:

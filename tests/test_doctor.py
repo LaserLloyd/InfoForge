@@ -458,3 +458,20 @@ def test_a_conclusive_probe_beats_the_type_list_and_the_list_covers_a_silent_pro
     assert doctor._mount_ignores_modes("/config/c.yaml") is False
     monkeypatch.setattr(doctor, "_mount_for", lambda p: None)
     assert doctor._mount_ignores_modes("/config/c.yaml") is False
+
+
+def test_doctor_rows_never_show_url_credentials(config_path, healthy, monkeypatch):
+    real = doctor.load_config
+
+    def with_creds(path):
+        cfg = real(path)
+        return dataclasses.replace(cfg, base_url="http://u:s3cretpw@127.0.0.1:11234/v1")
+
+    monkeypatch.setattr(doctor, "load_config", with_creds)
+    for net in (Net(), Net(status=500),
+                Net(llm_error=requests.exceptions.ConnectionError(
+                    "boom http://u:s3cretpw@127.0.0.1:11234/v1/models"))):
+        report = doctor.run(str(config_path), session=net)
+        text = " ".join(c.detail for c in report.checks)
+        assert "s3cretpw" not in text
+        assert "***@127.0.0.1" in text

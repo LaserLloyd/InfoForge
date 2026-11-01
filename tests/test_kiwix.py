@@ -5,6 +5,7 @@ Every HTTP call goes through an injected fake session — no network, no podman.
 
 from __future__ import annotations
 
+import pytest
 import requests
 from conftest import FakeResponse, search_xml
 
@@ -171,7 +172,7 @@ class FakePodman:
         self.cmd = cmd if cmd is not None else []
         self.argvs: list[tuple[str, ...]] = []
 
-    def __call__(self, *args, check=False):
+    def __call__(self, *args, check=False, timeout=None):
         import subprocess
         self.argvs.append(args)
         out = ""
@@ -434,3 +435,32 @@ def test_fetch_article_honours_a_declared_charset(cfg):
     body = "<p>café</p>".encode("latin-1")
     session = FakeSession([_raw_response(body, "text/html; charset=ISO-8859-1")])
     assert kiwix.fetch_article(cfg, "/content/wiki/A", session=session) == "<p>café</p>"
+
+
+def test_podman_read_calls_time_out_with_a_kiwix_error(monkeypatch):
+    import subprocess
+
+    def hang(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
+    monkeypatch.setattr(subprocess, "run", hang)
+    with pytest.raises(kiwix.KiwixError) as exc:
+        kiwix.container_state()
+    assert exc.value.code == "podman_timeout"
+    assert "15 s" in str(exc.value) and "podman system migrate" in str(exc.value)
+
+
+def test_podman_read_sites_pass_a_timeout_and_write_sites_do_not(monkeypatch):
+    import subprocess
+    seen = []
+
+    def fake_run(argv, **kwargs):
+        seen.append((argv[1], kwargs.get("timeout")))
+        return subprocess.CompletedProcess(argv, 0, "running", "")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    kiwix.container_state()
+    kiwix._container_cmd()
+    kiwix._container_started_epoch()
+    assert {t for _, t in seen} == {kiwix.PODMAN_READ_TIMEOUT_S}
+    seen.clear()
+    kiwix._podman("start", kiwix.CONTAINER_NAME)
+    assert seen == [("start", None)]

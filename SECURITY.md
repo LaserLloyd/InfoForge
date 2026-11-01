@@ -4,10 +4,11 @@
 
 Please do **not** open a public issue for a security problem.
 
-Report it privately to **security@example.invalid** *(placeholder: the maintainer
-replaces this address before the first public release)*. Include the InfoForge
-version (`infoforge --version`), what you did, what you expected and what
-happened. You will get an acknowledgement; there is no bug bounty.
+Use **Report a vulnerability** under the repository's Security tab (GitHub
+private vulnerability reporting:
+https://github.com/LaserLloyd/InfoForge/security/advisories/new). <!-- scrub-ok: public repo URL -->
+Include the InfoForge version (`infoforge --version`), what you did, what you
+expected and what happened. You will get an acknowledgement; there is no bug bounty.
 
 ## Supported versions
 
@@ -27,7 +28,10 @@ accounts and no telemetry. What it does expose:
   `base_url`. `api_key` is held in the config file in plaintext; keep that file
   mode 600 (`doctor` checks) or use `INFOFORGE_API_KEY` (on a Windows bind mount, which
   cannot carry modes, use the environment variable). It is never written to
-  the event log and `config show` redacts it.
+  the event log and `config show` redacts it. Credentials embedded in a
+  `base_url` (`https://user:pass@host`) are redacted to `***@` in the event log,
+  warnings, `doctor` output and `config show`; prefer `api_key` or
+  `INFOFORGE_API_KEY`.
 - **Untrusted text.** Article text goes into the prompt verbatim, so an article
   can attempt prompt injection. InfoForge's tools have no side effects beyond
   returning text, but the model's verdict marker can be spoofed by article
@@ -42,6 +46,11 @@ accounts and no telemetry. What it does expose:
   random per-install `question.key`, mode 0600, beside the log) and the length of
   each question by default, not the text. Whoever can read `question.key` can
   still test guesses against the digests, so treat the log directory as private.
+  While `log_questions` is off, InfoForge also rewrites `log.jsonl` and its rotated
+  copies once per process (best effort) to remove question text, question hashes
+  and article titles left by 2.0 or by an earlier `log_questions: true` period;
+  old records keep only the question length, and a `log_scrub` event records that
+  it ran. Rotation and this rewrite take a `log.jsonl.lock` file.
 - **Supply chain.** The kiwix image is pinned by tag, not `latest`; digest
   pinning is not done. CI runs `pip-audit` against the locked dependency set.
 - **Outbound connections** are listed in the README ("Network use").

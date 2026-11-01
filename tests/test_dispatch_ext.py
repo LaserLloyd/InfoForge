@@ -193,3 +193,97 @@ def test_a_slow_lookup_times_out_politely(monkeypatch):
     finally:
         release.set()
     assert "timed out" in out
+
+
+# ------------------------------------------- failures must reach DisPatch as ok=False
+
+@pytest.fixture
+def fake_registry(monkeypatch):
+    """A stand-in for DisPatch's ``app.livetools.registry`` with its ToolResult."""
+    import dataclasses
+    import types
+
+    @dataclasses.dataclass
+    class ToolResult:
+        ok: bool
+        content: str
+        summary: str = ""
+
+    pkg = types.ModuleType("app")
+    pkg.__path__ = []
+    livetools = types.ModuleType("app.livetools")
+    livetools.__path__ = []
+    registry = types.ModuleType("app.livetools.registry")
+    registry.ToolResult = ToolResult
+    monkeypatch.setitem(sys.modules, "app", pkg)
+    monkeypatch.setitem(sys.modules, "app.livetools", livetools)
+    monkeypatch.setitem(sys.modules, "app.livetools.registry", registry)
+    monkeypatch.setattr(ext, "_ToolResult", None)
+    return ToolResult
+
+
+@pytest.fixture
+def no_registry(monkeypatch):
+    # A None entry in sys.modules makes `import` raise ImportError.
+    for name in ("app", "app.livetools", "app.livetools.registry"):
+        monkeypatch.setitem(sys.modules, name, None)
+    monkeypatch.setattr(ext, "_ToolResult", None)
+
+
+def test_setup_resolves_dispatchs_toolresult_class(fake_registry):
+    ext.setup(FakeCtx())
+    assert ext._ToolResult is fake_registry
+
+
+def test_failures_are_toolresult_ok_false_inside_dispatch(fake_registry, config_file, monkeypatch):
+    ext.setup(FakeCtx())
+    # empty query
+    out = run(ext.wiki_search({"query": "  "}))
+    assert isinstance(out, fake_registry) and out.ok is False
+    assert "query must be a non-empty string" in out.content and out.summary
+    # unavailable
+    monkeypatch.setattr(kiwix, "is_up", lambda cfg, session=None, timeout=5: False)
+    out = run(ext.wiki_search({"query": "emu"}))
+    assert isinstance(out, fake_registry) and out.ok is False
+    assert out.content.startswith("Offline Wikipedia is unavailable (kiwix_unreachable).")
+    # no articles: ok=False too, matching DisPatch's weather "place not found" and
+    # currency "no rate" results (a lookup that finds nothing is not a success row)
+    monkeypatch.setattr(retrieve, "retrieve", lambda *a, **k: [])
+    monkeypatch.setattr(kiwix, "is_up", lambda cfg, session=None, timeout=5: True)
+    out = run(ext.wiki_search({"query": "zqxv"}))
+    assert isinstance(out, fake_registry) and out.ok is False
+    assert out.content == "No articles found for 'zqxv' in the offline library."
+
+
+def test_timeout_is_toolresult_ok_false_inside_dispatch(fake_registry, monkeypatch):
+    import threading
+    ext.setup(FakeCtx())
+    release = threading.Event()
+    monkeypatch.setattr(ext, "_lookup", lambda q, n: (release.wait(0.3), "late")[1])
+    monkeypatch.setattr(ext, "TIMEOUT_S", 0.05)
+    try:
+        out = run(ext.wiki_search({"query": "x"}))
+    finally:
+        release.set()
+    assert isinstance(out, fake_registry) and out.ok is False
+    assert "timed out" in out.content
+
+
+def test_success_stays_a_plain_string_inside_dispatch(fake_registry, config_file, monkeypatch):
+    ext.setup(FakeCtx())
+    monkeypatch.setattr(ext, "_lookup", lambda q, n: "[1] A (u)\ntext")
+    assert run(ext.wiki_search({"query": "a"})) == "[1] A (u)\ntext"
+
+
+def test_failures_stay_strings_without_dispatch(no_registry):
+    ext.setup(FakeCtx())
+    assert ext._ToolResult is None
+    out = run(ext.wiki_search({"query": ""}))
+    assert isinstance(out, str) and "query must be a non-empty string" in out
+
+
+def test_importing_the_addon_never_imports_app():
+    import subprocess
+    code = ("import sys, infoforge_dispatch; "
+            "sys.exit(1 if any(m == 'app' or m.startswith('app.') for m in sys.modules) else 0)")
+    assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0

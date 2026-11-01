@@ -42,7 +42,7 @@ from .errors import (
     REASON_OTHER,
     error_info,
 )
-from .logging_ import event, note
+from .logging_ import event, note, warn
 from .zimify import zimify
 
 CATALOG_URL = api.CATALOG_URL
@@ -150,13 +150,16 @@ def _print_status(cfg: Config, as_json: bool = False) -> int:
     if as_json:
         _dump(info)
         return EXIT_OK
-    print(f"container {info['name']}: {info['state']}")
+    if info.get("podman") is False:
+        print("container: not managed (podman absent)")
+    else:
+        print(f"container {info['name']}: {info['state']}")
     if info.get("ps"):
         print(f"  {info['ps']}")
     print(f"  serving:    {', '.join(info['serving']) or '(none)'}")
     print(f"  configured: {', '.join(info['configured']) or '(none)'}")
     print(f"  url:        {info['kiwix_url']} "
-          f"({'responding' if info['kiwix_responding'] else 'no response'})")
+          f"({'kiwix is answering' if info['kiwix_responding'] else 'kiwix is NOT answering'})")
     return EXIT_OK
 
 
@@ -295,6 +298,10 @@ _QUERY_FLAGS: dict[str, dict[str, int]] = {
 }
 
 
+#: Global options that, written after ask/search, are question text (hint only).
+_GLOBAL_OPTIONS = ("--config", "--version", "-h", "--help")
+
+
 def protect_query(argv: list[str]) -> list[str]:
     """Rewrite ``ask``/``search`` argv so the question can never be read as a flag.
 
@@ -321,10 +328,12 @@ def protect_query(argv: list[str]) -> list[str]:
 
     flags: list[str] = []
     words: list[str] = []
+    saw_dd = False
     j = i + 1
     while j < len(argv):
         tok = argv[j]
         if tok == "--":
+            saw_dd = True
             words.extend(argv[j + 1:])
             break
         name, has_value, _ = tok.partition("=")
@@ -336,6 +345,11 @@ def protect_query(argv: list[str]) -> list[str]:
         else:
             words.append(tok)
         j += 1
+    if (not saw_dd and words and (words[0] in _GLOBAL_OPTIONS
+                                  or words[0].startswith("--config="))):
+        warn(f"'{words[0]}' is read as part of the question here; global options "
+             f"go before the subcommand (infoforge --config X {argv[i]} ...), "
+             "and '--' ends options")
     return [*argv[:i + 1], *flags, "--", *words]
 
 

@@ -35,6 +35,7 @@ Every failure InfoForge reports is one row here. The **exit code** and **reason*
 | [`kiwix_unreachable`](#kiwix_unreachable) | 2 | kiwix-serve does not answer at kiwix_url. |
 | [`kiwix_no_zims`](#kiwix_no_zims) | 2 | No enabled ZIM from the zims: list exists in zim_dir. |
 | [`podman_missing`](#podman_missing) | 2 | podman is not installed (needed only to run the kiwix container). |
+| [`podman_timeout`](#podman_timeout) | 2 | A read-only podman call (exists/inspect/ps) did not answer in time. |
 | [`container_failed`](#container_failed) | 2 | podman could not create, start or stop the kiwix container. |
 | [`llm_rejected`](#llm_rejected) | 2 | The LLM endpoint rejected the request itself (a 4xx that would fail identically on every endpoint). |
 | [`zimify_failed`](#zimify_failed) | 2 | `infoforge zimify` could not prepare or build the archive. |
@@ -113,6 +114,13 @@ Every failure InfoForge reports is one row here. The **exit code** and **reason*
 - **What happened:** podman is not installed (needed only to run the kiwix container).
 - **Message:** podman is not installed or not on PATH.
 - **Fix:** Install podman, or run your own kiwix-serve and set kiwix_url (then `serve` is not needed).
+
+### podman_timeout
+
+- **Exit:** 2 (`reason`: `config`)
+- **What happened:** A read-only podman call (exists/inspect/ps) did not answer in time.
+- **Message:** <detail>
+- **Fix:** podman is wedged: try `podman system migrate`, or restart the user session; or run your own kiwix-serve and set kiwix_url.
 
 ### container_failed
 

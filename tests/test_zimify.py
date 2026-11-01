@@ -141,3 +141,38 @@ def test_zimify_dot_takes_the_folder_name_as_title(docs, tmp_path, monkeypatch):
     assert "--title=docs" in report["command"]
     assert "<title>docs</title>" in (report["prep_dir"] / "index.html").read_text(
         encoding="utf-8")
+
+
+def _no_build(monkeypatch):
+    import subprocess
+    calls = []
+    monkeypatch.setattr(zimify_mod.shutil, "which", lambda tool: None)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(a))
+    return calls
+
+
+def test_title_30_chars_ok_31_fails(docs, tmp_path, monkeypatch):
+    _no_build(monkeypatch)
+    zimify(docs, tmp_path / "ok.zim", title="t" * 30)
+    with pytest.raises(ZimifyError) as exc:
+        zimify(docs, tmp_path / "bad.zim", title="t" * 31)
+    assert "30" in str(exc.value) and "31" in str(exc.value)
+    assert not (tmp_path / "bad.zim.prep").exists()
+
+
+def test_description_80_chars_ok_81_fails(docs, tmp_path, monkeypatch):
+    _no_build(monkeypatch)
+    zimify(docs, tmp_path / "ok.zim", description="d" * 80)
+    with pytest.raises(ZimifyError) as exc:
+        zimify(docs, tmp_path / "bad.zim", description="d" * 81)
+    assert "80" in str(exc.value) and "81" in str(exc.value)
+    assert not (tmp_path / "bad.zim.prep").exists()
+
+
+def test_default_title_from_folder_name_is_validated(tmp_path, monkeypatch):
+    _no_build(monkeypatch)
+    src = tmp_path / ("f" * 31)
+    src.mkdir()
+    (src / "a.html").write_text("<p>x</p>", encoding="utf-8")
+    with pytest.raises(ZimifyError, match="title"):
+        zimify(src, tmp_path / "o.zim")

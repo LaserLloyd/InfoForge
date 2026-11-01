@@ -18,7 +18,8 @@ Conventions
   the sources that were found.
 * :func:`search` and :func:`ask` only create or recreate the kiwix container
   when called with ``ensure=True``.  The default for ``search`` is ``False``:
-  a caller on a deadline (DisPatch gives it 8 s) must never wait on podman.
+  a caller on a deadline (the DisPatch add-on time-boxes itself to 12 s) must
+  never wait on podman.
 """
 
 from __future__ import annotations

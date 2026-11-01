@@ -379,6 +379,21 @@ def load(explicit: str | os.PathLike[str] | None = None,
     )
 
 
+_URL_USERINFO = re.compile(r"(?P<scheme>[A-Za-z][A-Za-z0-9+.\-]*://)[^/\s]+@")
+
+
+def redact_url(url: str) -> str:
+    """``scheme://user:pass@host`` -> ``scheme://***@host``.
+
+    A regex over free text, so it also cleans an exception message that embeds
+    the URL.  A URL without userinfo comes back unchanged.  Never raises.
+    """
+    try:
+        return _URL_USERINFO.sub(r"\g<scheme>***@", str(url))
+    except Exception:  # pragma: no cover
+        return "***"
+
+
 def show(cfg: Config) -> dict:
     """The effective configuration with each value's source; secrets redacted.
 
@@ -388,13 +403,15 @@ def show(cfg: Config) -> dict:
     for setting in schema.SETTINGS:
         value: Any = getattr(cfg, setting.key)
         if setting.key == "fallbacks":
-            value = [{"model_id": e.model_id, "base_url": e.base_url,
+            value = [{"model_id": e.model_id, "base_url": redact_url(e.base_url),
                       "api_key": "***" if e.api_key else ""} for e in cfg.fallbacks]
         elif setting.key == "zims":
             value = [{"file": z.file, "name": z.name, "enabled": z.enabled,
                       "license": z.license_label} for z in cfg.zims]
         elif setting.secret:
             value = "***" if value else ""
+        elif setting.key == "base_url":
+            value = redact_url(value)
         elif isinstance(value, Path):
             value = str(value)
         rows.append({"key": setting.key, "value": value,

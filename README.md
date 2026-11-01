@@ -336,7 +336,7 @@ the code).
 | `infoforge serve stop` | Stop the container. |
 | `infoforge serve status` | running / exited / not created. `--json` supported. |
 | `infoforge serve recreate` | Force a rebuild of the container — the way to pick up a ZIM you just added. |
-| `infoforge status` | Container, ZIMs, endpoint. `--json` supported. Works without podman (`state: unavailable`). |
+| `infoforge status` | Container, ZIMs, endpoint. `--json` supported. Works without podman (`--json` says `state: unavailable`; the table says `not managed`). |
 | `infoforge doctor` | The health table. Start here when anything is wrong. `--json` supported. |
 | `infoforge config show` | The effective settings, where each value came from (`cli` / `env` / `file` / `default`), secrets redacted. `--json` supported. |
 | `infoforge config schema` | Every setting with type, default, range and environment variable. `--json` prints a JSON Schema. |
@@ -472,9 +472,13 @@ point it at a local server if that matters.
 
 The event log (`~/.local/state/infoforge/log.jsonl`) is created mode `0600`,
 rotated at 1 MB (3 files kept) and, by default, stores **no question text** —
-only a SHA-256 prefix and the length, plus counts. Set `log_questions: true` to
-keep the text and article titles. `api_key` is never logged, and
-`infoforge config show` prints it as `***`.
+only a keyed digest (HMAC under a random per-install `question.key`, mode `0600`,
+beside the log) and the length, plus counts. Set `log_questions: true` to keep
+the text and article titles. While it is off, InfoForge also scrubs any question
+text an older release (2.0) or an earlier `log_questions: true` period left in
+the log files, once per process and best-effort. `api_key` is never logged, and
+`infoforge config show` prints it as `***`; a `user:password@` part in a
+`base_url` is redacted everywhere it is printed or logged.
 
 ## Content licensing
 

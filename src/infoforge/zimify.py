@@ -29,6 +29,11 @@ ILLUSTRATION_NAME = "illustration.png"
 ILLUSTRATION_SIZE = 48
 
 
+#: libzim's hard limits on the mandatory ZIM metadata.
+MAX_TITLE_CHARS = 30
+MAX_DESCRIPTION_CHARS = 80
+
+
 class ZimifyError(InfoForgeError):
     """Input directory missing, or the zim build failed."""
 
@@ -109,10 +114,20 @@ def zimify(input_dir: Path, output_zim: Path, title: str = "",
         raise ZimifyError(f"input directory not found: {input_dir}")
 
     output_zim = Path(output_zim).expanduser().resolve()
-    output_zim.parent.mkdir(parents=True, exist_ok=True)
     # resolve(): `zimify .` has an empty .name, and zimwriterfs refuses an
     # empty --title (Title is mandatory ZIM metadata).
     title = title or input_dir.resolve().name
+    # libzim caps these; fail here with a clear message, before any prep work,
+    # instead of deep inside zimwriterfs.
+    if len(title) > MAX_TITLE_CHARS:
+        raise ZimifyError(
+            f"title is {len(title)} characters; a ZIM title is limited to "
+            f"{MAX_TITLE_CHARS} (shorten --title: {title!r})")
+    if len(description) > MAX_DESCRIPTION_CHARS:
+        raise ZimifyError(
+            f"description is {len(description)} characters; a ZIM description is "
+            f"limited to {MAX_DESCRIPTION_CHARS} (shorten --description)")
+    output_zim.parent.mkdir(parents=True, exist_ok=True)
 
     prep_dir = Path(str(output_zim) + ".prep")
     if prep_dir.exists():

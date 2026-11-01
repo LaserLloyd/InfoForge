@@ -194,3 +194,17 @@ def test_the_legacy_port_is_labelled_in_config_show(tmp_path):
     fresh = config_mod.load(tmp_path / "absent.yaml", environ={
         "INFOFORGE_MODEL_ID": "m", "INFOFORGE_BASE_URL": "http://127.0.0.1:11234/v1"})
     assert fresh.sources["kiwix_port"] == "default"
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("1", True), ("on", True), (" ON ", True), ("0", False), ("off", False),
+    ("Off", False), ("true", True), ("No", False),
+])
+def test_as_bool_accepts_one_zero_on_off(raw, expected):
+    assert schema.as_bool(raw, "log_questions", "env") is expected
+
+
+def test_as_bool_rejects_other_strings_and_names_the_forms():
+    with pytest.raises(ConfigError) as exc:
+        schema.as_bool("maybe", "log_questions", "env")
+    assert "on/off, 1/0" in str(exc.value)

@@ -18,7 +18,7 @@ import requests
 import yaml
 
 from . import kiwix
-from .config import Config, ConfigError
+from .config import Config, ConfigError, redact_url
 from .config import load as load_config
 from .errors import info_for_code
 from .retrieve import keyword_query
@@ -86,11 +86,11 @@ def _check_llm(report: Report, label: str, endpoint, timeout: float,
     try:
         resp = get(endpoint.models_url, headers=headers, timeout=timeout)
     except requests.exceptions.RequestException as exc:
-        report.add(label, False, f"{endpoint.base_url} unreachable: {exc}")
+        report.add(label, False, f"{redact_url(endpoint.base_url)} unreachable: {redact_url(str(exc))}")
         return
     if resp.status_code >= 400:
         report.add(label, False,
-                   f"{endpoint.base_url} answered HTTP {resp.status_code}")
+                   f"{redact_url(endpoint.base_url)} answered HTTP {resp.status_code}")
         return
     served = ""
     try:
@@ -101,7 +101,7 @@ def _check_llm(report: Report, label: str, endpoint, timeout: float,
                      " (WARNING: model_id not in /models list)"
     except ValueError:
         pass
-    report.add(label, True, f"{endpoint.base_url} reachable, model "
+    report.add(label, True, f"{redact_url(endpoint.base_url)} reachable, model "
                             f"{endpoint.model_id}{served}")
 
 

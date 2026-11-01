@@ -114,6 +114,11 @@ _ROWS = (
           "podman is not installed or not on PATH.",
           "Install podman, or run your own kiwix-serve and set kiwix_url (then "
           "`serve` is not needed)."),
+    _spec("podman_timeout", EXIT_CONFIG,
+          "A read-only podman call (exists/inspect/ps) did not answer in time.",
+          "{detail}",
+          "podman is wedged: try `podman system migrate`, or restart the user "
+          "session; or run your own kiwix-serve and set kiwix_url."),
     _spec("container_failed", EXIT_CONFIG,
           "podman could not create, start or stop the kiwix container.",
           "{detail}",

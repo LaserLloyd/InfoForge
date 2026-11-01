@@ -43,6 +43,10 @@ CONTAINER_PORT = 8080
 SEARCH_TIMEOUT_S = 20
 SUGGEST_TIMEOUT_S = 15
 FETCH_TIMEOUT_S = 30
+#: Read-only podman calls (exists/inspect/ps) are time-boxed; a wedged rootless
+#: podman otherwise hangs status, doctor and the MCP tools.  Never applied to
+#: run/start/stop/rm (an image pull can take minutes).
+PODMAN_READ_TIMEOUT_S = 15.0
 
 
 class KiwixError(InfoForgeError):
@@ -67,7 +71,8 @@ def podman_available() -> bool:
 
 # --------------------------------------------------------------------- podman
 
-def _podman(*args: str, check: bool = False) -> subprocess.CompletedProcess:
+def _podman(*args: str, check: bool = False,
+            timeout: float | None = None) -> subprocess.CompletedProcess:
     """Run podman with a fixed argv (never shell=True).
 
     stdin is /dev/null: under ``infoforge-mcp`` (``status``/``doctor`` tools)
@@ -80,7 +85,14 @@ def _podman(*args: str, check: bool = False) -> subprocess.CompletedProcess:
             capture_output=True,
             text=True,
             check=check,
+            timeout=timeout,
         )
+    except subprocess.TimeoutExpired:
+        raise KiwixError(
+            f"podman did not answer in {timeout:g} s — a wedged rootless podman; "
+            "try `podman system migrate` or restart the user session",
+            code="podman_timeout",
+        ) from None
     except FileNotFoundError:
         raise KiwixError(
             "podman is not installed or not on PATH — InfoForge runs kiwix-serve "
@@ -92,10 +104,11 @@ def _podman(*args: str, check: bool = False) -> subprocess.CompletedProcess:
 
 def container_state(name: str = CONTAINER_NAME) -> str:
     """``missing`` | ``running`` | ``exited`` | ``created`` | ``paused`` | ``unknown``."""
-    exists = _podman("container", "exists", name)
+    exists = _podman("container", "exists", name, timeout=PODMAN_READ_TIMEOUT_S)
     if exists.returncode != 0:
         return "missing"
-    got = _podman("inspect", "-f", "{{.State.Status}}", name)
+    got = _podman("inspect", "-f", "{{.State.Status}}", name,
+                  timeout=PODMAN_READ_TIMEOUT_S)
     state = got.stdout.strip()
     return state or "unknown"
 
@@ -107,7 +120,8 @@ def _container_started_epoch(name: str = CONTAINER_NAME) -> float:
     seconds and a trailing timezone *name* that no stdlib parser accepts, so
     strip both before parsing (the bash launcher did the same with sed).
     """
-    got = _podman("inspect", "-f", "{{.State.StartedAt}}", name)
+    got = _podman("inspect", "-f", "{{.State.StartedAt}}", name,
+                  timeout=PODMAN_READ_TIMEOUT_S)
     raw = got.stdout.strip()
     if not raw:
         return 0.0
@@ -123,7 +137,8 @@ def _container_started_epoch(name: str = CONTAINER_NAME) -> float:
 
 def _container_cmd(name: str = CONTAINER_NAME) -> list[str]:
     """The argv the container was created with (used to spot a ZIM-set change)."""
-    got = _podman("inspect", "-f", "{{json .Config.Cmd}}", name)
+    got = _podman("inspect", "-f", "{{json .Config.Cmd}}", name,
+                  timeout=PODMAN_READ_TIMEOUT_S)
     try:
         value = json.loads(got.stdout.strip() or "null")
     except ValueError:
@@ -297,6 +312,7 @@ def status(cfg: Config) -> dict:
         ps = _podman(
             "ps", "-a", "--filter", f"name={CONTAINER_NAME}",
             "--format", "{{.Image}} | {{.Status}} | {{.Ports}}",
+            timeout=PODMAN_READ_TIMEOUT_S,
         )
         info["ps"] = ps.stdout.strip()
     return info

@@ -13,12 +13,13 @@ from infoforge.answer import (
     VERDICT_ANSWERED,
     VERDICT_NOT_IN_SOURCES,
     LLMRequestError,
+    ask_llm,
     build_prompt,
     cited_titles,
     parse_verdict,
     strip_cot,
 )
-from infoforge.config import LLMUnreachableError
+from infoforge.config import Endpoint, LLMUnreachableError
 from infoforge.retrieve import Source
 
 SOURCES = [
@@ -365,3 +366,27 @@ def test_answer_question_carries_the_verdict(cfg):
     assert result.text.startswith("Emu War is about")
     # The refusal names a title, which is exactly why cited-check alone failed.
     assert result.cited == ["Emu War"]
+
+
+def test_url_credentials_never_reach_log_warning_or_error(cfg, capsys):
+    import os
+    from pathlib import Path
+    pw = "s3cretpw"
+    cfg = replace(cfg, base_url=f"http://u:{pw}@127.0.0.1:11234/v1",
+                  fallbacks=(Endpoint("fb", f"http://a:{pw}@127.0.0.1:11235/v1"),))
+    boom = requests.exceptions.ConnectionError(
+        f"failed to reach http://u:{pw}@127.0.0.1:11234/v1/chat/completions")
+    s = ChainSession(boom, boom)
+    with pytest.raises(LLMUnreachableError) as err:
+        ask_llm(cfg, "p", session=s)
+    assert pw not in str(err.value)
+    assert pw not in capsys.readouterr().err
+    assert pw not in Path(os.environ["INFOFORGE_LOG"]).read_text(encoding="utf-8")
+    assert s.urls[0].startswith(f"http://u:{pw}@")  # the real URL is still used
+
+
+def test_url_credentials_not_in_attempt_records(cfg):
+    pw = "s3cretpw"
+    cfg = replace(cfg, base_url=f"http://u:{pw}@127.0.0.1:11234/v1")
+    _, _, attempts = ask_llm(cfg, "p", session=ChainSession(reply("ok")))
+    assert pw not in repr(attempts)

@@ -17,6 +17,7 @@ looks like a credential as a second line of defence.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
@@ -24,6 +25,7 @@ import os
 import secrets
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 DEFAULT_LOG_PATH = Path("~/.local/state/infoforge/log.jsonl")
@@ -100,6 +102,7 @@ def question_fields(question: str, keep: bool = False) -> dict:
     """
     if keep:
         return {"question": question}
+    _scrub_plaintext_once()
     out: dict = {}
     key = _question_key()
     if key is not None:
@@ -109,18 +112,157 @@ def question_fields(question: str, keep: bool = False) -> dict:
     return out
 
 
+#: A rotation/scrub lock older than this is assumed to be left by a dead process.
+LOCK_STALE_S = 60.0
+
+
+@contextlib.contextmanager
+def _file_lock(path: Path) -> Iterator[bool]:
+    """Hold ``<log>.lock`` (created O_EXCL) while rotating or scrubbing.
+
+    Yields True when we own the lock, False when another writer does (the
+    caller skips the work — that writer is doing it).  A lock older than
+    LOCK_STALE_S is removed and taken once more.  Never raises.
+    """
+    lock = path.with_name(path.name + ".lock")
+    owned = False
+    for attempt in range(2):
+        try:
+            fd = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            if attempt == 0:
+                try:
+                    if time.time() - lock.stat().st_mtime > LOCK_STALE_S:
+                        lock.unlink()
+                        continue
+                except OSError:
+                    pass
+            break
+        except OSError:
+            break
+        os.close(fd)
+        owned = True
+        break
+    try:
+        yield owned
+    finally:
+        if owned:
+            with contextlib.suppress(OSError):
+                lock.unlink()
+
+
 def _rotate(path: Path) -> None:
-    """Shift ``log.jsonl`` -> ``.1`` -> ``.2`` ... once it is over MAX_BYTES."""
+    """Shift ``log.jsonl`` -> ``.1`` -> ``.2`` ... once it is over MAX_BYTES.
+
+    Done under a lock file so concurrent writers cannot double-rotate; a writer
+    that cannot take the lock simply skips rotation this time.
+    """
     try:
         if path.stat().st_size < MAX_BYTES:
             return
     except OSError:
         return
-    for i in range(KEEP, 0, -1):
-        src = path if i == 1 else path.with_name(f"{path.name}.{i - 1}")
-        dst = path.with_name(f"{path.name}.{i}")
-        if src.exists():
-            os.replace(src, dst)
+    with _file_lock(path) as owned:
+        if not owned:
+            return
+        try:
+            if path.stat().st_size < MAX_BYTES:
+                return  # another writer rotated between our check and the lock
+            for i in range(KEEP, 0, -1):
+                src = path if i == 1 else path.with_name(f"{path.name}.{i - 1}")
+                dst = path.with_name(f"{path.name}.{i}")
+                if src.exists():
+                    os.replace(src, dst)
+        except OSError:
+            pass
+
+
+# Field names 2.0 wrote in plaintext: the question, a SHA-256 of it (2.1
+# pre-HMAC builds), and article titles (``titles`` on retrieve, ``cited`` on ask).
+_PLAINTEXT_MARKERS = (b'"question":', b'"question_sha256"', b'"titles":', b'"cited":')
+_scrub_done = False
+
+
+def _scrub_record(rec: dict) -> bool:
+    """Strip question text from one record in place; True if it changed."""
+    changed = False
+    q = rec.get("question")
+    if q is not None:
+        del rec["question"]
+        rec.setdefault("question_chars", len(q) if isinstance(q, str) else 0)
+        changed = True
+    for name in ("question_sha256", "titles", "cited"):
+        if name in rec:
+            del rec[name]
+            changed = True
+    return changed
+
+
+def _scrub_file(path: Path) -> int:
+    """Rewrite one log file without plaintext; returns records changed."""
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return 0
+    if not any(m in raw for m in _PLAINTEXT_MARKERS):
+        return 0
+    out: list[bytes] = []
+    changed = 0
+    for line in raw.splitlines(keepends=True):
+        if any(m in line for m in _PLAINTEXT_MARKERS):
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                rec = None
+            if isinstance(rec, dict) and _scrub_record(rec):
+                nl = b"\n" if line.endswith(b"\n") else b""
+                line = json.dumps(rec, default=str, ensure_ascii=False).encode("utf-8") + nl
+                changed += 1
+        out.append(line)
+    if not changed:
+        return 0
+    tmp = path.with_name(f"{path.name}.scrub-{os.getpid()}")
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(b"".join(out))
+        os.replace(tmp, path)
+    except OSError:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        return 0
+    return changed
+
+
+def _scrub_plaintext_once() -> None:
+    """While ``log_questions`` is off the log files must hold no question text.
+
+    Runs at most once per process (cheap byte pre-check per file, JSON only on
+    a hit).  Old records keep their length as ``question_chars``; no HMAC is
+    computed for them.  Best effort, never raises.
+    """
+    global _scrub_done
+    if _scrub_done:
+        return
+    try:
+        path = log_path()
+        files = [path] + [path.with_name(f"{path.name}.{i}") for i in range(1, KEEP + 1)]
+        files = [f for f in files if f.exists()]
+        n_files = n_records = 0
+        if files:
+            with _file_lock(path) as owned:
+                if not owned:
+                    return  # another writer holds it: retry on the next call
+                for f in files:
+                    n = _scrub_file(f)
+                    if n:
+                        n_files += 1
+                        n_records += n
+        _scrub_done = True
+        if n_records:
+            event("log_scrub", files=n_files, records=n_records)
+    except Exception:  # pragma: no cover - logging is never fatal
+        _scrub_done = True
 
 
 def event(kind: str, **fields) -> None:

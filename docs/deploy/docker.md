@@ -74,10 +74,10 @@ docker run --rm -v infoforge-state:/state -v "$PWD":/backup:ro alpine \
 ## Build
 
 ```bash
-docker build --build-arg VERSION=2.1.0 -t ghcr.io/laserlloyd/infoforge:2.1.0 .
-podman build --format docker --build-arg VERSION=2.1.0 -t ghcr.io/laserlloyd/infoforge:2.1.0 .
+docker build --build-arg VERSION=2.2.0 -t ghcr.io/laserlloyd/infoforge:2.2.0 .
+podman build --format docker --build-arg VERSION=2.2.0 -t ghcr.io/laserlloyd/infoforge:2.2.0 .
 ```
 
 `uv.lock` is tracked here, so the image installs the locked set (`uv sync --locked`). `compose.yml`
-builds the same image with `INFOFORGE_TAG` (default `2.1.0`, keep it equal to `pyproject.toml`'s
+builds the same image with `INFOFORGE_TAG` (default `2.2.0`, keep it equal to `pyproject.toml`'s
 version) as both the tag and the `VERSION` label.

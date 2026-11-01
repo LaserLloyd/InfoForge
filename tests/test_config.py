@@ -269,3 +269,29 @@ def test_zims_and_fallbacks_shape_errors(tmp_path):
 def test_private_helpers_still_work_for_old_callers(tmp_path):
     assert config_mod._as_int("7", "k", tmp_path) == 7
     assert config_mod._as_bool("no", "k", tmp_path) is False
+
+
+# ---------------------------------------------------- redact_url (#13)
+
+def test_redact_url_hides_userinfo():
+    from infoforge.config import redact_url
+    assert redact_url("https://user:pw@host:1/v1") == "https://***@host:1/v1"
+    assert redact_url("https://tok@host/v1") == "https://***@host/v1"
+    assert redact_url("http://host/v1") == "http://host/v1"
+    assert redact_url("") == ""
+
+
+def test_redact_url_cleans_urls_inside_free_text():
+    from infoforge.config import redact_url
+    msg = "HTTPSConnectionPool(host='h'): Max retries with url: https://u:p%40ss@h/v1/x (x)"
+    out = redact_url(msg)
+    assert "p%40ss" not in out and "https://***@h/v1/x" in out
+
+
+def test_show_redacts_userinfo_in_base_url_and_fallbacks(tmp_path):
+    from infoforge.config import show
+    cfg = config_mod.load(write(tmp_path, "model_id: m\nbase_url: https://u:topsecret@h/v1\n"
+                     "fallbacks:\n  - {model_id: f, base_url: 'http://a:hunter2@g/v1'}\n"))
+    text = json.dumps(show(cfg))
+    assert "topsecret" not in text and "hunter2" not in text
+    assert "https://***@h/v1" in text and "http://***@g/v1" in text

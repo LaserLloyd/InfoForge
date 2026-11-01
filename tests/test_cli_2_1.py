@@ -267,7 +267,7 @@ def test_status_json_without_podman(config_file, monkeypatch, capsys):
     info = json.loads(capsys.readouterr().out)
     assert info["state"] == "unavailable" and info["kiwix_responding"] is True
     assert cli.main(["status"]) == EXIT_OK
-    assert "container infoforge-kiwix: unavailable" in capsys.readouterr().out
+    assert "container: not managed (podman absent)" in capsys.readouterr().out
 
 
 def test_zim_list_text(config_file, capsys):
@@ -425,7 +425,7 @@ def test_version_string_is_the_package_version(capsys):
     with pytest.raises(SystemExit):
         cli.main(["--version"])
     assert f"infoforge {__version__}" in capsys.readouterr().out
-    assert __version__ == "2.1.0"
+    assert __version__ == "2.2.0"
 
 
 def test_answer_module_is_the_one_the_api_calls():
@@ -438,3 +438,45 @@ def test_cli_max_articles_below_one_is_exit_2(config_file, capsys):
     assert cli.main(["search", "--json", "--max-articles", "-1", "emu"]) == 2
     out = json.loads(capsys.readouterr().out)
     assert out["error"]["code"] == "usage_error"
+
+
+def test_status_without_podman_says_not_managed(config_file, monkeypatch, capsys):
+    def no_podman(cfg):
+        raise kiwix.KiwixError("x", code="podman_missing")
+    monkeypatch.setattr(kiwix, "status", no_podman)
+    assert cli.main(["status"]) == EXIT_OK
+    out = capsys.readouterr().out
+    assert "container: not managed (podman absent)" in out
+    assert "unavailable" not in out
+    assert "kiwix is answering" in out
+
+
+@pytest.mark.parametrize("query", [
+    ["--config", "x", "q"], ["--config=x", "q"], ["--version"],
+])
+def test_misplaced_global_option_prints_a_hint_but_searches_literally(
+        query, config_file, monkeypatch, capsys):
+    seen = {}
+
+    def fake(cfg, q, max_articles=None, session=None):
+        seen["q"] = q
+        return list(SOURCES)
+    monkeypatch.setattr(retrieve, "retrieve", fake)
+    cli.main(["search", "--json", *query])
+    err = capsys.readouterr().err
+    assert "global options go before the subcommand" in err
+    assert seen["q"] == " ".join(query)
+
+
+@pytest.mark.parametrize("query", [["--", "--config", "x"], ["-5", "degrees", "in", "kelvin"]])
+def test_no_hint_after_double_dash_or_for_a_plain_dash_question(
+        query, config_file, monkeypatch, capsys):
+    seen = {}
+
+    def fake(cfg, q, max_articles=None, session=None):
+        seen["q"] = q
+        return list(SOURCES)
+    monkeypatch.setattr(retrieve, "retrieve", fake)
+    assert cli.main(["search", "--json", *query]) == EXIT_OK
+    assert "global options" not in capsys.readouterr().err
+    assert seen["q"] == " ".join(t for t in query if t != "--")

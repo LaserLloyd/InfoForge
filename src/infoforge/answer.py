@@ -20,7 +20,14 @@ from dataclasses import dataclass, field
 
 import requests
 
-from .config import EXIT_CONFIG, Config, Endpoint, InfoForgeError, LLMUnreachableError
+from .config import (
+    EXIT_CONFIG,
+    Config,
+    Endpoint,
+    InfoForgeError,
+    LLMUnreachableError,
+    redact_url,
+)
 from .logging_ import event, warn
 from .retrieve import Source
 
@@ -370,23 +377,24 @@ def ask_llm(cfg: Config, prompt: str,
     """
     attempts: list[Attempt] = []
     for endpoint in cfg.endpoints:
+        shown = redact_url(endpoint.base_url)
         try:
             content = call_endpoint(cfg, endpoint, prompt, session=session)
         except LLMRequestError:
-            attempts.append(Attempt(endpoint.model_id, endpoint.base_url, False,
+            attempts.append(Attempt(endpoint.model_id, shown, False,
                                     "request rejected"))
             event("llm_attempt", model_id=endpoint.model_id,
-                  base_url=endpoint.base_url, ok=False, error="rejected")
+                  base_url=shown, ok=False, error="rejected")
             raise
         except (requests.exceptions.RequestException, RuntimeError) as exc:
-            attempts.append(Attempt(endpoint.model_id, endpoint.base_url, False, str(exc)))
+            attempts.append(Attempt(endpoint.model_id, shown, False, redact_url(str(exc))))
             event("llm_attempt", model_id=endpoint.model_id,
-                  base_url=endpoint.base_url, ok=False, error=str(exc))
-            warn(f"LLM {endpoint.model_id} at {endpoint.base_url} failed: {exc}")
+                  base_url=shown, ok=False, error=redact_url(str(exc)))
+            warn(f"LLM {endpoint.model_id} at {shown} failed: {redact_url(str(exc))}")
             continue
-        attempts.append(Attempt(endpoint.model_id, endpoint.base_url, True))
+        attempts.append(Attempt(endpoint.model_id, shown, True))
         event("llm_attempt", model_id=endpoint.model_id,
-              base_url=endpoint.base_url, ok=True)
+              base_url=shown, ok=True)
         return content, endpoint, attempts
 
     tried = ", ".join(f"{a.model_id}@{a.base_url}" for a in attempts) or "nothing"

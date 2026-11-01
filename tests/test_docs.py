@@ -120,4 +120,31 @@ def test_version_is_consistent_everywhere():
     from infoforge import __version__
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert f'version = "{__version__}"' in pyproject
-    assert __version__ == "2.1.0"
+    assert __version__ == "2.2.0"
+
+
+def test_compose_default_tag_matches_the_package_version():
+    """Issue #7: the compose image tag default must not drift from the release."""
+    import re
+
+    from infoforge import __version__
+    compose = (ROOT / "deploy" / "compose" / "compose.yml").read_text(encoding="utf-8")
+    tags = set(re.findall(r"\$\{INFOFORGE_TAG:-([^}]+)\}", compose))
+    assert tags, "deploy/compose/compose.yml has no ${INFOFORGE_TAG:-<version>} default"
+    py = re.search(r'^version\s*=\s*"([^"]+)"', (ROOT / "pyproject.toml").read_text(
+        encoding="utf-8"), re.M)
+    assert py and py.group(1) == __version__, (
+        f"pyproject.toml version {py and py.group(1)!r} != infoforge.__version__ "
+        f"{__version__!r}: fix pyproject.toml or src/infoforge/__init__.py")
+    assert tags == {__version__}, (
+        f"deploy/compose/compose.yml defaults INFOFORGE_TAG to {sorted(tags)} but the "
+        f"package version is {__version__!r}: update every ${{INFOFORGE_TAG:-...}} "
+        "default in deploy/compose/compose.yml")
+
+
+def test_security_policy_uses_private_vulnerability_reporting():
+    text = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+    assert "example.invalid" not in text and "placeholder" not in text
+    assert "Report a vulnerability" in text
+    line = next(ln for ln in text.splitlines() if "github.com/LaserLloyd" in ln)  # scrub-ok: public repo URL
+    assert "scrub-ok" in line

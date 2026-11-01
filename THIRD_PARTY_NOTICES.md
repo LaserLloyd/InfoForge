@@ -1,8 +1,8 @@
 # Third-party notices
 
-InfoForge itself is MIT-licensed (see [LICENSE](LICENSE)). It uses, or invokes,
+InfoForge itself is released under MIT No Attribution (MIT-0; see [LICENSE](LICENSE)). It uses, or invokes,
 the components below. Versions are those pinned in `uv.lock` at the time of
-release 2.1.0; `uv.lock` is authoritative, and each component's own licence text
+release 2.2.0; `uv.lock` is authoritative, and each component's own licence text
 ships with its package.
 
 ## Python dependencies (installed with InfoForge)

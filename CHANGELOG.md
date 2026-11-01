@@ -7,14 +7,63 @@ since 2.0.0.
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-11-01
+
+November 2026 monthly update: the MIT-0 relicense, the two October fixes, and the
+review items filed as GitHub issues #2–#18 (every one that did not need the
+maintainer's account or a new feature).
+
+### Added
+- `infoforge ask/search` print a stderr hint when the question starts with
+  `--config`, `--config=…` or `--version` and no `--` was given: global options
+  go before the subcommand. The text is still searched literally, as before (#2).
+- Error code `podman_timeout` (exit 2, additive): a read-only podman call
+  (`container exists`, `inspect`, `ps`) that does not answer in 15 s no longer
+  hangs `status`, `doctor` and the MCP tools. `run`/`start`/`stop`/`rm` are not
+  time-boxed (an image pull may take minutes) (#11).
+- `zimify` validates the ZIM `--title` (max 30 characters, including the
+  folder-name default) and `--description` (max 80) before any prep work (#17).
+- A test that `deploy/compose/compose.yml`'s default `INFOFORGE_TAG` equals the
+  package version (#7).
+
 ### Changed
+- `infoforge status` without podman prints `container: not managed (podman
+  absent)` and says whether kiwix is answering, instead of `unavailable`;
+  `--json` is unchanged (#3).
+- Boolean settings and `INFOFORGE_*` overrides accept `1`/`0`/`on`/`off` as
+  well as `true`/`false`/`yes`/`no` (#14).
+- The DisPatch add-on returns its failures (library unavailable, timed out,
+  empty query, no articles) as DisPatch `ToolResult(ok=False)` when it runs
+  inside DisPatch, so they are no longer recorded as successful tool results;
+  outside DisPatch they stay plain strings. Nothing is imported from DisPatch at
+  import time (#15).
+- `SECURITY.md` points to GitHub private vulnerability reporting instead of a
+  placeholder address (#5).
 
 - **Licence: MIT No Attribution (MIT-0).** You can use, copy, change and ship InfoForge with no
   conditions; no copyright notice has to be kept. You don't need to credit this project — but if you
   do, a link back is appreciated. `LICENSE`, `pyproject.toml` (`MIT-0`), the Docker image label and the
   README say so. Releases up to 2.1.0 were MIT. Retrieved ZIM content keeps its own licence.
 
+### Security
+- A `user:password@` part in `base_url` (primary or fallback) is redacted to
+  `***@` in the event log, warnings, `doctor` output, `config show` and any
+  exception text that embeds the URL. Requests still use the real URL (#13).
+- Log files written by 2.0 (plaintext `question`, `titles`, `cited`) and by
+  pre-release 2.1 builds (`question_sha256`) are scrubbed automatically: while
+  `log_questions` is off, the first digest-mode question per process rewrites
+  `log.jsonl` and its rotated copies (0600 temp file + rename, under the
+  rotation lock, best effort); old records keep only `question_chars`, and one
+  `log_scrub` event records the rewrite (#18).
+- Log rotation takes an `O_EXCL` `log.jsonl.lock` (stale after 60 s), so two
+  writers (the MCP server, DisPatch) can no longer double-rotate and drop the
+  oldest file (#12).
+
 ### Fixed
+- `api.py` said DisPatch gives the add-on 8 s; the add-on time-boxes itself to
+  12 s and DisPatch imposes no deadline (#16).
+- README "Privacy" described the digest as a SHA-256 prefix; it has been a keyed
+  HMAC since 2.1.0. `THIRD_PARTY_NOTICES.md` now says MIT-0.
 - Questions with non-ASCII words were searched in pieces: the keyword
   tokenizer only knew `[A-Za-z0-9]`, so "Galápagos" became "Gal pagos" and
   "Zürich" became "Z rich" (CJK words vanished). Tokens and title words now
