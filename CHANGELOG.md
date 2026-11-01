@@ -14,6 +14,9 @@ review items filed as GitHub issues #2–#18 (every one that did not need the
 maintainer's account or a new feature).
 
 ### Added
+- `infoforge support-bundle` prints one redacted JSON report (version, Python, OS, effective
+  config with secrets and URL userinfo masked, the `doctor` result, home directory shown as `~`)
+  to attach to a bug report; it never logs a question (#9).
 - `infoforge ask/search` print a stderr hint when the question starts with
   `--config`, `--config=…` or `--version` and no `--` was given: global options
   go before the subcommand. The text is still searched literally, as before (#2).

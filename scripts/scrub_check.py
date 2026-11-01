@@ -199,6 +199,11 @@ CONTENT_RULES: list[tuple[re.Pattern, str]] = [
 OK_MARKER = re.compile(r"(?:#|//|--|::)\s*scrub-ok\b"
                        r"|(?:/\*|<!--)\s*scrub-ok\b")
 
+# This project's own public coordinates (GitHub repo and GHCR image). The org
+# name is published on purpose; a maintainer's local rules that list it as a
+# private identifier must not trip over these exact references.
+PUBLIC_REF = re.compile(r"(?:ghcr\.io|github\.com)/laserlloyd/infoforge\b", re.IGNORECASE)  # scrub-ok: the public org name, matched only to exempt it
+
 #: The `why` string load_local_rules attaches to every local rule.
 LOCAL_RULE_WHY = "a local private identifier"
 
@@ -365,7 +370,7 @@ def scan_text(text: str, label: str) -> list[str]:
         if OK_MARKER.search(line):
             continue
         for pattern, why in rules:
-            m = pattern.search(line)
+            m = pattern.search(PUBLIC_REF.sub("", line) if why == LOCAL_RULE_WHY else line)
             if m:
                 snippet = m.group(0)
                 if len(snippet) > 60:
@@ -476,7 +481,7 @@ def scan(root: Path, staged: bool = False, rev: str | None = None) -> list[str]:
                     continue
                 if licence_notice and why == LOCAL_RULE_WHY:
                     continue  # a copyright holder is published on purpose
-                m = pattern.search(line)
+                m = pattern.search(PUBLIC_REF.sub("", line) if why == LOCAL_RULE_WHY else line)
                 if m:
                     snippet = m.group(0)
                     if len(snippet) > 60:

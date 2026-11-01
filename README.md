@@ -113,7 +113,7 @@ docker compose run --rm infoforge doctor
 docker compose run --rm infoforge ask "Why is the sky blue?"
 ```
 
-`doctor` checks the config, the ZIM, kiwix, a test search and your LLM; fix the first red row. The first
+`doctor` checks the config, the ZIM, kiwix, a test search and your LLM; fix the first red row. To report a bug, attach the output of `infoforge support-bundle` (redacted JSON). The first
 `compose run` builds the CLI image from the clone. `host.docker.internal` reaches an LLM server running on
 Windows. Details: [docs/deploy/docker.md](docs/deploy/docker.md).
 

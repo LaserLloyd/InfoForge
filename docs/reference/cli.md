@@ -86,6 +86,14 @@ infoforge doctor [--json]
 |---|---|---|
 | `--json` | machine-readable output |  |
 
+## `infoforge support-bundle`
+
+Print a redacted diagnostic report to attach to a bug report.
+
+```text
+infoforge support-bundle
+```
+
 ## `infoforge zim`
 
 Zim registry.

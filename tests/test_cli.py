@@ -274,3 +274,17 @@ def test_config_error_json(capsys, monkeypatch, tmp_path):
     assert payload["exit_code"] == EXIT_CONFIG
     assert payload["reason"] == "config"
     assert payload["sources"] == []
+
+
+def test_support_bundle_is_redacted_json(capsys, monkeypatch, tmp_path):
+    from pathlib import Path
+    monkeypatch.setenv("INFOFORGE_API_KEY", "sk-super-secret-value")
+    monkeypatch.setenv("INFOFORGE_BASE_URL", "http://user:hunter2@llm.example:1234/v1")  # scrub-ok: fixture
+    monkeypatch.setattr(cli.api, "doctor", lambda config=None: {
+        "ok": False, "checks": [{"name": "x", "detail": f"{Path.home()}/zims failed"}]})
+    assert cli.main(["support-bundle"]) == EXIT_OK
+    out = capsys.readouterr().out
+    data = json.loads(out)
+    assert data["infoforge"] and data["doctor"]["ok"] is False
+    assert "sk-super-secret-value" not in out and "hunter2" not in out
+    assert str(Path.home()) not in out

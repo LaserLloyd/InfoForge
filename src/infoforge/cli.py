@@ -33,6 +33,7 @@ from .config import (
     EXIT_OK,
     Config,
     InfoForgeError,
+    redact_url,
 )
 from .config import load as load_config
 from .errors import (
@@ -176,6 +177,43 @@ def cmd_doctor(args) -> int:
     else:
         print(doctor_mod.render(report))
     return EXIT_OK if report["ok"] else EXIT_FAILED
+
+
+# ------------------------------------------------------------ support bundle
+
+def _bundle_clean(value):
+    """Redact for sharing: URL userinfo, secrets already ``***``, the home dir -> ``~``."""
+    home = str(Path.home())
+    if isinstance(value, dict):
+        return {k: _bundle_clean(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_bundle_clean(v) for v in value]
+    if isinstance(value, str):
+        text = redact_url(value)
+        return text.replace(home, "~") if home and home != "/" else text
+    return value
+
+
+def cmd_support_bundle(args) -> int:
+    """One redacted JSON document to attach to a bug report. Never raises, never logs questions."""
+    import platform
+    bundle = {
+        "infoforge": __version__,
+        "python": platform.python_version(),
+        "platform": f"{platform.system()} {platform.release()}",
+        "config": None,
+        "doctor": None,
+    }
+    try:
+        bundle["config"] = api.config_show(config=args.config)
+    except Exception as exc:  # a broken config is exactly what the bundle is for
+        bundle["config"] = {"error": f"{type(exc).__name__}: {exc}"}
+    try:
+        bundle["doctor"] = api.doctor(config=args.config)
+    except Exception as exc:
+        bundle["doctor"] = {"error": f"{type(exc).__name__}: {exc}"}
+    _dump(_bundle_clean(bundle))
+    return EXIT_OK
 
 
 # ----------------------------------------------------------------------- zim
@@ -407,6 +445,10 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor", help="check every link in the chain")
     doctor.add_argument("--json", action="store_true", help="machine-readable output")
     doctor.set_defaults(func=cmd_doctor)
+
+    bundle = sub.add_parser("support-bundle",
+                            help="print a redacted diagnostic report to attach to a bug report")
+    bundle.set_defaults(func=cmd_support_bundle)
 
     zim = sub.add_parser("zim", help="ZIM registry")
     zim.add_argument("action", choices=("list", "check-update"))
