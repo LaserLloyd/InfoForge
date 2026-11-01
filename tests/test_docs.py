@@ -120,7 +120,7 @@ def test_version_is_consistent_everywhere():
     from infoforge import __version__
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert f'version = "{__version__}"' in pyproject
-    assert __version__ == "2.2.0"
+    assert __version__ == "2.2.1"
 
 
 def test_compose_default_tag_matches_the_package_version():

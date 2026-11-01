@@ -425,7 +425,7 @@ def test_version_string_is_the_package_version(capsys):
     with pytest.raises(SystemExit):
         cli.main(["--version"])
     assert f"infoforge {__version__}" in capsys.readouterr().out
-    assert __version__ == "2.2.0"
+    assert __version__ == "2.2.1"
 
 
 def test_answer_module_is_the_one_the_api_calls():

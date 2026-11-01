@@ -57,12 +57,12 @@ services:
     profiles: [cli]
     # Built locally from the clone when the tag is not present (compose run/build).
     # Keep the default in step with pyproject.toml's version.
-    image: ghcr.io/laserlloyd/infoforge:${INFOFORGE_TAG:-2.2.0}
+    image: ghcr.io/laserlloyd/infoforge:${INFOFORGE_TAG:-2.2.1}
     build:
       context: ../..
       dockerfile: Dockerfile
       args:
-        VERSION: ${INFOFORGE_TAG:-2.2.0}
+        VERSION: ${INFOFORGE_TAG:-2.2.1}
     init: true
     command: ["doctor"]
     depends_on:

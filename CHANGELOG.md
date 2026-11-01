@@ -7,6 +7,20 @@ since 2.0.0.
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-11-01
+
+Same as 2.2.0 plus what its first CI run needed (the `v2.2.0` tag was pushed before this
+landed, so it is superseded rather than moved).
+
+### Added
+- `infoforge support-bundle` prints one redacted JSON report (version, Python, OS, effective
+  config with secrets and URL userinfo masked, the `doctor` result, home directory shown as `~`)
+  to attach to a bug report; it never logs a question (#9).
+
+### Fixed
+- CI: `certifi` bumped to 2026.10.23 (pip-audit PYSEC-2026-4320); workflow actions pinned to commit SHAs;
+  the privacy scanner no longer flags this project's own public repo and image names.
+
 ## [2.2.0] - 2026-11-01
 
 November 2026 monthly update: the MIT-0 relicense, the two October fixes, and the
@@ -14,9 +28,6 @@ review items filed as GitHub issues #2–#18 (every one that did not need the
 maintainer's account or a new feature).
 
 ### Added
-- `infoforge support-bundle` prints one redacted JSON report (version, Python, OS, effective
-  config with secrets and URL userinfo masked, the `doctor` result, home directory shown as `~`)
-  to attach to a bug report; it never logs a question (#9).
 - `infoforge ask/search` print a stderr hint when the question starts with
   `--config`, `--config=…` or `--version` and no `--` was given: global options
   go before the subcommand. The text is still searched literally, as before (#2).
